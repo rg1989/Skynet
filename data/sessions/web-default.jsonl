@@ -1,0 +1,12 @@
+{"role":"user","content":"Hello! What is 2 + 2?","timestamp":1769627209391}
+{"role":"assistant","content":"{\"name\": \"speak\", \"arguments\": {\"text\": \"The answer to 2 plus 2 is 4.\"}}","timestamp":1769627237751}
+{"role":"user","content":"Hello! What is 2 + 2?","timestamp":1769627414701}
+{"role":"assistant","content":"{\"name\": \"speak\", \"arguments\": {\"text\": \"Hello! The answer to 2 plus 2 is 4.\"}}","timestamp":1769627453737}
+{"role":"user","content":"Hello! What is 2 + 2?","timestamp":1769627537750}
+{"role":"assistant","content":"{\"name\": \"speak\", \"arguments\": {\"text\": \"Hello again! The answer to 2 plus 2 is still 4. How can I assist you further today?\"}}","timestamp":1769627552260}
+{"role":"user","content":"Hi there! What is 2 + 2?","timestamp":1769627633656}
+{"role":"assistant","content":"{\"name\": \"speak\", \"arguments\": {\"text\": \"Hello! The answer to 2 plus 2 is 4.\"}}","timestamp":1769627656075}
+{"role":"user","content":"What is the capital of France?","timestamp":1769627705642}
+{"role":"assistant","content":"The capital of France is Paris.","timestamp":1769627708238}
+{"role":"user","content":"Tell me a short joke","timestamp":1769627719638}
+{"role":"assistant","content":"Why don't scientists trust atoms? Because they make up everything.","timestamp":1769627722017}

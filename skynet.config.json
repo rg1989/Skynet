@@ -1,0 +1,42 @@
+{
+  "server": {
+    "port": 3000,
+    "host": "localhost"
+  },
+  "telegram": {
+    "botToken": "${TELEGRAM_BOT_TOKEN}",
+    "allowedUsers": []
+  },
+  "providers": {
+    "default": "ollama",
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "model": "qwen2.5:7b-instruct-q4_K_M",
+      "visionModel": "llava",
+      "toolsEnabled": false
+    },
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "model": "gpt-4o",
+      "visionModel": "gpt-4o"
+    },
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "model": "claude-sonnet-4-20250514"
+    },
+    "embeddings": {
+      "provider": "ollama",
+      "model": "nomic-embed-text"
+    }
+  },
+  "agent": {
+    "systemPrompt": "You are Skynet, a helpful personal AI assistant. You have access to various tools to help the user with tasks including file operations, command execution, web browsing, vision, audio, and memory. Always be helpful, accurate, and proactive in using your capabilities.",
+    "maxTokens": 4096,
+    "memory": {
+      "enabled": true,
+      "autoRemember": true,
+      "searchTopK": 5
+    }
+  },
+  "dataDir": "./data"
+}
