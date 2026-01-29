@@ -114,6 +114,7 @@ export type WSEventType =
   | 'agent:token'
   | 'agent:tool_start'
   | 'agent:tool_end'
+  | 'agent:confirm_required'  // High-risk tool needs user confirmation
   | 'agent:end'
   | 'memory:stored'
   | 'memory:recalled'
@@ -130,6 +131,20 @@ export interface WSEvent {
   type: WSEventType;
   payload: unknown;
   timestamp: number;
+}
+
+// Tool confirmation request/response for high-risk output tools
+export interface ToolConfirmationRequest {
+  confirmId: string;
+  runId: string;
+  toolName: string;
+  toolParams: Record<string, unknown>;
+  riskReason: string;
+}
+
+export interface ToolConfirmationResponse {
+  confirmId: string;
+  approved: boolean;
 }
 
 // Memory types

@@ -9,9 +9,10 @@ import { TranscribingIndicator } from './TranscribingIndicator';
 import { ListeningOverlay } from './ListeningOverlay';
 import { AvatarModeView } from './AvatarModeView';
 import { StreamingCodeBlock } from './StreamingCodeBlock';
+import { SecurityConfirmModal } from './SecurityConfirmModal';
 import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
+import { useWebSocket, clearCurrentRun } from '../hooks/useWebSocket';
 import { formatThoughtProcess } from '../utils/formatThoughtProcess';
-import { clearCurrentRun } from '../hooks/useWebSocket';
 
 /**
  * Segment types for parsed streaming content
@@ -243,7 +244,12 @@ export function Chat() {
     setIsTranscribing,
     avatarModeEnabled,
     avatarDesign,
+    pendingConfirmation,
+    setPendingConfirmation,
   } = useStore();
+
+  // WebSocket hook for sending confirmation responses
+  const { sendMessage } = useWebSocket();
 
   // Speech recognition hook (local Whisper-based, no API key needed)
   const {
@@ -556,6 +562,27 @@ export function Chat() {
     [messages]
   );
 
+  // Tool confirmation handlers
+  const handleConfirmTool = useCallback(() => {
+    if (pendingConfirmation) {
+      sendMessage('confirm_response', {
+        confirmId: pendingConfirmation.confirmId,
+        approved: true,
+      });
+      setPendingConfirmation(null);
+    }
+  }, [pendingConfirmation, sendMessage, setPendingConfirmation]);
+
+  const handleDenyTool = useCallback(() => {
+    if (pendingConfirmation) {
+      sendMessage('confirm_response', {
+        confirmId: pendingConfirmation.confirmId,
+        approved: false,
+      });
+      setPendingConfirmation(null);
+    }
+  }, [pendingConfirmation, sendMessage, setPendingConfirmation]);
+
   return (
     <div className="flex h-full bg-[#15181c]">
       {/* Session sidebar */}
@@ -661,6 +688,16 @@ export function Chat() {
           loadingProgress={whisperProgress}
           silenceProgress={silenceProgress}
           hasSpeechStarted={hasSpeechStarted}
+        />
+      )}
+
+      {/* Security confirmation modal - shown when a high-risk tool needs user approval */}
+      {pendingConfirmation && (
+        <SecurityConfirmModal
+          isOpen={true}
+          confirmation={pendingConfirmation}
+          onConfirm={handleConfirmTool}
+          onCancel={handleDenyTool}
         />
       )}
     </div>

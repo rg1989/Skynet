@@ -2,6 +2,7 @@ import type { Message, Session, Skill } from '../types/index.js';
 import type { Config } from '../config/schema.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { getPersona } from './personas.js';
+import { SECURITY_INSTRUCTIONS } from './security.js';
 
 /**
  * Context builder - assembles messages for LLM
@@ -196,7 +197,8 @@ After completing a task, summarize what was done.`;
     ? generateToolInstructions(enabledSkills)
     : '';
 
-  return basePrompt + memorySection + toolKnowledge + toolInstructions;
+  // Append security instructions to help defend against prompt injection
+  return basePrompt + memorySection + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
 }
 
 /**

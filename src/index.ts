@@ -3,6 +3,7 @@ import { loadConfig } from './config/loader.js';
 import { initializeRuntimeConfig, initializeDefaultToolStates } from './config/runtime.js';
 import { createAppServer } from './server/http.js';
 import { setScheduler, setAgentRunner, setProviderManager } from './server/routes.js';
+import { setAgentRunner as setWsAgentRunner } from './server/ws-handler.js';
 import { createProviderManager } from './providers/index.js';
 import { AgentRunner } from './agent/index.js';
 import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills, initializeSelfConfigSkills, initializeScheduleSkills } from './skills/index.js';
@@ -138,6 +139,9 @@ async function main(): Promise<void> {
   // Set agent runner and provider manager on routes for API
   setAgentRunner(agentRunner);
   setProviderManager(providerManager);
+  
+  // Set agent runner on ws-handler for confirmation responses
+  setWsAgentRunner(agentRunner);
 
   // Initialize scheduler
   const scheduler = new Scheduler(

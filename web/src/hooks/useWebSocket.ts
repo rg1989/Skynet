@@ -55,6 +55,7 @@ export function useWebSocket() {
     setAvatarRatio,
     setShowContent,
     setContentUrl,
+    setPendingConfirmation,
   } = useStore();
 
   useEffect(() => {
@@ -141,6 +142,19 @@ export function useWebSocket() {
           break;
         }
 
+        case 'agent:confirm_required': {
+          // Handle tool confirmation request for high-risk output tools
+          const confirmPayload = p as {
+            confirmId: string;
+            runId: string;
+            toolName: string;
+            toolParams: Record<string, unknown>;
+            riskReason: string;
+          };
+          setPendingConfirmation(confirmPayload);
+          break;
+        }
+
         default:
           // Ignore unhandled events
           break;
@@ -222,6 +236,7 @@ export function useWebSocket() {
     setAvatarRatio,
     setShowContent,
     setContentUrl,
+    setPendingConfirmation,
   ]);
 
   const sendMessage = (type: string, payload: unknown) => {

@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Server } from 'http';
-import type { WSEvent, WSEventType } from '../types/index.js';
+import type { WSEvent, WSEventType, ToolConfirmationResponse } from '../types/index.js';
+import type { AgentRunner } from '../agent/runner.js';
 
 /**
  * WebSocket handler for real-time communication with clients
@@ -12,6 +13,16 @@ interface ConnectedClient {
   connectedAt: number;
   pingInterval?: NodeJS.Timeout;
   isAlive: boolean;
+}
+
+// Agent runner instance (set during initialization)
+let agentRunner: AgentRunner | null = null;
+
+/**
+ * Set the agent runner instance for handling confirmation responses
+ */
+export function setAgentRunner(runner: AgentRunner): void {
+  agentRunner = runner;
 }
 
 export class WSHandler {
@@ -101,6 +112,16 @@ export class WSHandler {
           break;
         case 'subscribe':
           // Could implement topic subscriptions here
+          break;
+        case 'confirm_response':
+          // Handle tool confirmation response from UI
+          if (agentRunner && message.payload) {
+            const response = message.payload as ToolConfirmationResponse;
+            const handled = agentRunner.handleConfirmationResponse(response);
+            if (!handled) {
+              console.warn(`Confirmation response not handled: ${response.confirmId}`);
+            }
+          }
           break;
         default:
           // Unknown message type

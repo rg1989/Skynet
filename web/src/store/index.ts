@@ -66,6 +66,15 @@ export interface ToolInfo {
   enabled: boolean;
 }
 
+// Tool confirmation request for high-risk output tools
+export interface ToolConfirmationRequest {
+  confirmId: string;
+  runId: string;
+  toolName: string;
+  toolParams: Record<string, unknown>;
+  riskReason: string;
+}
+
 export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
 
 export type AvatarDesign = 'geometric' | 'holographic' | 'android' | 'image';
@@ -187,6 +196,10 @@ interface AppState {
   setContentUrl: (url: string | null) => void;
   ttsEnabled: boolean;
   setTtsEnabled: (enabled: boolean) => void;
+  
+  // Tool confirmation for high-risk output tools
+  pendingConfirmation: ToolConfirmationRequest | null;
+  setPendingConfirmation: (confirmation: ToolConfirmationRequest | null) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -307,4 +320,8 @@ export const useStore = create<AppState>((set) => ({
       return { ttsEnabled: enabled };
     });
   },
+  
+  // Tool confirmation for high-risk output tools
+  pendingConfirmation: null,
+  setPendingConfirmation: (confirmation) => set({ pendingConfirmation: confirmation }),
 }));

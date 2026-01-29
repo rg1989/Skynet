@@ -1,11 +1,13 @@
 import type { Config } from '../config/schema.js';
-import type { Skill, SkillContext, SkillResult, SessionMessage, WSEventType } from '../types/index.js';
+import type { Skill, SkillContext, SkillResult, SessionMessage, WSEventType, ToolConfirmationRequest, ToolConfirmationResponse } from '../types/index.js';
 import type { LLMProvider, StreamChunk } from '../providers/types.js';
 import type { ProviderManager } from '../providers/index.js';
 import { SessionManager } from './session.js';
 import { buildContext, addToolResult, addAssistantToolCalls, type ToolsMode } from './context.js';
 import { toolParser, type ParsedToolCall } from './tool-parser.js';
 import { getRuntimeConfig } from '../config/runtime.js';
+import { isHighRiskInput, isHighRiskOutput, wrapUntrustedContent } from './security.js';
+import { randomBytes } from 'crypto';
 
 /**
  * Agent Runner - orchestrates message processing and tool execution
@@ -35,6 +37,14 @@ export interface AgentRunResult {
 
 export type BroadcastFn = (type: WSEventType, payload: unknown) => void;
 
+// Pending confirmation with resolve/reject callbacks
+interface PendingConfirmation {
+  resolve: (approved: boolean) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+  request: ToolConfirmationRequest;
+}
+
 export class AgentRunner {
   private config: Config;
   private sessionManager: SessionManager;
@@ -42,6 +52,10 @@ export class AgentRunner {
   private providerManager: ProviderManager;
   private broadcast: BroadcastFn;
   private runningTasks: Map<string, AbortController> = new Map();
+  private pendingConfirmations: Map<string, PendingConfirmation> = new Map();
+
+  // Timeout for waiting for user confirmation (2 minutes)
+  private static readonly CONFIRMATION_TIMEOUT_MS = 120000;
 
   constructor(
     config: Config,
@@ -52,6 +66,86 @@ export class AgentRunner {
     this.sessionManager = new SessionManager(config.dataDir);
     this.providerManager = providerManager;
     this.broadcast = broadcast;
+  }
+
+  /**
+   * Request user confirmation for a high-risk tool execution
+   * Returns a promise that resolves to true if approved, false if denied
+   */
+  private async requestConfirmation(
+    runId: string,
+    toolName: string,
+    toolParams: Record<string, unknown>
+  ): Promise<boolean> {
+    const confirmId = `confirm_${randomBytes(8).toString('hex')}`;
+    
+    const riskReason = this.getToolRiskReason(toolName, toolParams);
+    
+    const request: ToolConfirmationRequest = {
+      confirmId,
+      runId,
+      toolName,
+      toolParams,
+      riskReason,
+    };
+
+    return new Promise((resolve, reject) => {
+      // Set timeout for confirmation
+      const timeout = setTimeout(() => {
+        this.pendingConfirmations.delete(confirmId);
+        reject(new Error(`Confirmation timeout for tool: ${toolName}`));
+      }, AgentRunner.CONFIRMATION_TIMEOUT_MS);
+
+      // Store pending confirmation
+      this.pendingConfirmations.set(confirmId, {
+        resolve,
+        reject,
+        timeout,
+        request,
+      });
+
+      // Broadcast confirmation request to UI
+      this.broadcast('agent:confirm_required', request);
+    });
+  }
+
+  /**
+   * Handle confirmation response from UI
+   */
+  handleConfirmationResponse(response: ToolConfirmationResponse): boolean {
+    const pending = this.pendingConfirmations.get(response.confirmId);
+    if (!pending) {
+      console.warn(`No pending confirmation found for: ${response.confirmId}`);
+      return false;
+    }
+
+    // Clear timeout
+    clearTimeout(pending.timeout);
+    
+    // Remove from pending
+    this.pendingConfirmations.delete(response.confirmId);
+    
+    // Resolve the promise
+    pending.resolve(response.approved);
+    return true;
+  }
+
+  /**
+   * Get human-readable explanation of why this tool is high-risk
+   */
+  private getToolRiskReason(toolName: string, params: Record<string, unknown>): string {
+    switch (toolName) {
+      case 'exec':
+        return `Execute shell command: ${params.command || 'unknown'}`;
+      case 'gmail_send':
+        return `Send email to: ${params.to || 'unknown'}`;
+      case 'write_file':
+        return `Write to file: ${params.path || 'unknown'}`;
+      case 'edit_file':
+        return `Edit file: ${params.path || 'unknown'}`;
+      default:
+        return `Execute high-risk tool: ${toolName}`;
+    }
   }
 
   /**
@@ -211,8 +305,8 @@ export class AgentRunner {
               params: call.arguments,
             });
 
-            // Execute tool
-            const result = await this.executeSkill(call.name, call.arguments, params.sessionKey);
+            // Execute tool (passing runId for confirmation flow on high-risk output tools)
+            const result = await this.executeSkill(call.name, call.arguments, params.sessionKey, runId);
 
             // Broadcast tool end
             this.broadcast('agent:tool_end', {
@@ -222,11 +316,20 @@ export class AgentRunner {
               media: result.media,
             });
 
+            // Prepare tool result content
+            let resultContent = JSON.stringify(result.success ? result.data : { error: result.error });
+            
+            // Wrap high-risk input tool results with spotlighting markers
+            // This helps defend against prompt injection from external data sources
+            if (isHighRiskInput(call.name)) {
+              resultContent = wrapUntrustedContent(resultContent, call.name);
+            }
+
             // Add tool result to messages
             messages = addToolResult(
               messages,
               call.id,
-              JSON.stringify(result.success ? result.data : { error: result.error })
+              resultContent
             );
           }
           
@@ -363,8 +466,8 @@ export class AgentRunner {
         params: call.arguments,
       });
 
-      // Execute tool
-      const result = await this.executeSkill(call.name, call.arguments, sessionKey);
+      // Execute tool (passing runId for confirmation flow on high-risk output tools)
+      const result = await this.executeSkill(call.name, call.arguments, sessionKey, runId);
 
       // Broadcast tool end
       this.broadcast('agent:tool_end', {
@@ -374,10 +477,19 @@ export class AgentRunner {
         media: result.media,
       });
 
+      // Prepare output, wrapping high-risk input tools with spotlighting markers
+      let output: string | undefined;
+      if (result.success) {
+        output = JSON.stringify(result.data);
+        if (isHighRiskInput(call.name)) {
+          output = wrapUntrustedContent(output, call.name);
+        }
+      }
+
       results.push({
         name: call.name,
         success: result.success,
-        output: result.success ? JSON.stringify(result.data) : undefined,
+        output,
         error: result.error,
       });
     }
@@ -386,12 +498,13 @@ export class AgentRunner {
   }
 
   /**
-   * Execute a skill
+   * Execute a skill with optional confirmation for high-risk output tools
    */
   private async executeSkill(
     name: string,
     params: Record<string, unknown>,
-    sessionKey: string
+    sessionKey: string,
+    runId?: string
   ): Promise<SkillResult> {
     const skill = this.skills.get(name);
     
@@ -400,6 +513,30 @@ export class AgentRunner {
         success: false,
         error: `Unknown skill: ${name}`,
       };
+    }
+
+    // Check if this is a high-risk output tool that requires confirmation
+    if (runId && isHighRiskOutput(name)) {
+      try {
+        const approved = await this.requestConfirmation(runId, name, params);
+        if (!approved) {
+          // Return an error with instructions for the agent
+          // The agent should ASK the user before trying alternative approaches
+          return {
+            success: false,
+            error: `DENIED BY USER: The user denied execution of "${name}" with these parameters. ` +
+              `IMPORTANT: Do NOT automatically try alternative tools or approaches to achieve the same goal. ` +
+              `Instead, inform the user that you were denied and ASK them if they would like you to try a different approach. ` +
+              `Wait for their explicit permission before proceeding with any alternatives.`,
+          };
+        }
+      } catch (error) {
+        return {
+          success: false,
+          error: `Confirmation failed for ${name}: ${error instanceof Error ? error.message : String(error)}. ` +
+            `Please ask the user if they want to retry or try a different approach.`,
+        };
+      }
     }
 
     const context: SkillContext = {
