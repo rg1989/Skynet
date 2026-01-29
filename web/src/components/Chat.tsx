@@ -243,7 +243,6 @@ export function Chat() {
     isTranscribing,
     setIsTranscribing,
     avatarModeEnabled,
-    avatarDesign,
     pendingConfirmation,
     setPendingConfirmation,
   } = useStore();
@@ -409,16 +408,12 @@ export function Chat() {
     setTimeout(() => refreshSessions(), 500);
 
     try {
-      // Determine persona based on avatar mode
-      const persona = avatarModeEnabled && avatarDesign === 'image' ? 'hawking' : undefined;
-      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
           sessionKey: currentSessionKey,
-          persona,
         }),
       });
 
@@ -488,7 +483,7 @@ export function Chat() {
         timestamp: Date.now(),
       });
     }
-  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, clearActiveTools, currentSessionKey, refreshSessions, avatarModeEnabled, avatarDesign]);
+  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, clearActiveTools, currentSessionKey, refreshSessions, avatarModeEnabled]);
 
   const handleStop = useCallback(() => {
     // Clear module-level WebSocket state to stop processing incoming events

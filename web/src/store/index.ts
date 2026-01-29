@@ -77,7 +77,7 @@ export interface ToolConfirmationRequest {
 
 export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
 
-export type AvatarDesign = 'geometric' | 'holographic' | 'android' | 'image';
+export type AvatarDesign = '3d';
 
 // LocalStorage key for avatar mode settings
 const STORAGE_KEY_AVATAR = 'skynet_avatar_mode';
@@ -111,12 +111,14 @@ function getInitialAvatarSettings(): {
   try {
     const stored = localStorage.getItem(STORAGE_KEY_AVATAR);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      // Always use '3d' design (other designs have been removed)
+      return { ...parsed, design: '3d' as AvatarDesign };
     }
   } catch {
     // localStorage not available or invalid JSON
   }
-  return { enabled: false, design: 'image', ttsEnabled: true };
+  return { enabled: false, design: '3d', ttsEnabled: true };
 }
 
 // Save avatar settings to localStorage

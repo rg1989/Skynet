@@ -1,13 +1,14 @@
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { useStore, type Message, type AvatarDesign } from '../store';
-import { CyberFace } from './CyberFace';
-import { ImageAvatar } from './ImageAvatar';
+import { useRef, useEffect, useCallback, useState, useMemo, Suspense, lazy } from 'react';
+import { useStore, type Message } from '../store';
 import { ChatMessage } from './ChatMessage';
 import { InputBar } from './InputBar';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { TranscribingIndicator } from './TranscribingIndicator';
 import { ContentDisplay } from './ContentDisplay';
 import { useTTS, stripMarkdownForTTS } from '../hooks/useTTS';
+
+// Lazy load TalkingHeadAvatar to avoid loading Three.js bundle when not needed
+const TalkingHeadAvatar = lazy(() => import('./TalkingHeadAvatar'));
 
 interface AvatarModeViewProps {
   messages: Message[];
@@ -20,8 +21,8 @@ interface AvatarModeViewProps {
 }
 
 /**
- * Avatar Mode View - split layout with cyber face on left and chat on right.
- * Features TTS integration for speaking assistant messages with mouth animation.
+ * Avatar Mode View - split layout with 3D avatar on left and chat on right.
+ * Features TTS integration for speaking assistant messages with lip sync animation.
  */
 export function AvatarModeView({
   messages,
@@ -37,10 +38,9 @@ export function AvatarModeView({
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const previousMessagesRef = useRef<Message[]>([]);
+  const [currentSpeakingText, setCurrentSpeakingText] = useState<string | null>(null);
 
   const {
-    avatarDesign,
-    setAvatarDesign,
     avatarRatio,
     setAvatarRatio,
     showContent,
@@ -89,16 +89,26 @@ export function AvatarModeView({
       const cleanText = stripMarkdownForTTS(latest.content);
       if (cleanText) {
         speak(cleanText);
+        // Set text for 3D avatar lip sync
+        setCurrentSpeakingText(cleanText);
       }
     }
 
     previousMessagesRef.current = messages;
   }, [messages, ttsEnabled, ttsSupported, speak]);
 
+  // Clear speaking text when speech ends
+  useEffect(() => {
+    if (!isSpeaking && currentSpeakingText) {
+      setCurrentSpeakingText(null);
+    }
+  }, [isSpeaking, currentSpeakingText]);
+
   // Stop speaking when user sends a new message
   useEffect(() => {
     if (isProcessing && isSpeaking) {
       stopSpeaking();
+      setCurrentSpeakingText(null);
     }
   }, [isProcessing, isSpeaking, stopSpeaking]);
 
@@ -130,27 +140,6 @@ export function AvatarModeView({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, setAvatarRatio]);
-
-  // Avatar design options
-  const designOptions: { value: AvatarDesign; label: string }[] = [
-    { value: 'image', label: 'Hawking' },
-    { value: 'geometric', label: 'Geometric' },
-    { value: 'holographic', label: 'Holographic' },
-    { value: 'android', label: 'Android' },
-  ];
-
-  // For Hawking avatar, force Eddy voice
-  const isHawkingAvatar = avatarDesign === 'image';
-  
-  // Auto-select Eddy voice for Hawking avatar
-  useEffect(() => {
-    if (isHawkingAvatar && voices.length > 0) {
-      const eddyVoice = voices.find(v => v.name.toLowerCase().includes('eddy') && v.lang.startsWith('en'));
-      if (eddyVoice && selectedVoice?.name !== eddyVoice.name) {
-        setVoice(eddyVoice);
-      }
-    }
-  }, [isHawkingAvatar, voices, selectedVoice, setVoice]);
 
   return (
     <div ref={containerRef} className="flex-1 flex h-full bg-[#15181c] relative">
@@ -199,28 +188,15 @@ export function AvatarModeView({
               </button>
             )}
 
-            {/* Avatar design selector */}
-            <select
-              value={avatarDesign}
-              onChange={(e) => setAvatarDesign(e.target.value as AvatarDesign)}
-              className="bg-slate-700/50 border border-slate-600/50 text-slate-300 text-sm rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50"
-            >
-              {designOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-
-            {/* Voice selector (if TTS enabled and not Hawking avatar) */}
-            {ttsEnabled && voices.length > 0 && !isHawkingAvatar && (
+            {/* Voice selector */}
+            {ttsEnabled && voices.length > 0 && (
               <select
                 value={selectedVoice?.name || ''}
                 onChange={(e) => {
                   const voice = voices.find(v => v.name === e.target.value);
                   setVoice(voice || null);
                 }}
-                className="bg-slate-700/50 border border-slate-600/50 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 max-w-[120px]"
+                className="bg-slate-700/50 border border-slate-600/50 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 max-w-[150px]"
                 title="Voice"
               >
                 {voices.slice(0, 20).map((voice) => (
@@ -230,33 +206,26 @@ export function AvatarModeView({
                 ))}
               </select>
             )}
-            
-            {/* Show locked voice indicator for Hawking */}
-            {ttsEnabled && isHawkingAvatar && (
-              <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-700/30 rounded-lg text-xs text-slate-400">
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                </svg>
-                <span>Eddy</span>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Avatar display area */}
-        <div className="flex-1 flex items-center justify-center p-8 relative">
-          {avatarDesign === 'image' ? (
-            <ImageAvatar
+        <div className="flex-1 flex items-center justify-center p-4 relative">
+          <Suspense fallback={
+            <div className="flex items-center justify-center w-full h-full">
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-sm text-slate-400">Loading 3D Avatar...</p>
+              </div>
+            </div>
+          }>
+            <TalkingHeadAvatar
               isSpeaking={isSpeaking}
-              className="w-full max-w-md"
+              textToSpeak={currentSpeakingText}
+              className="w-full h-full"
+              mood={isThinking ? 'neutral' : 'happy'}
             />
-          ) : (
-            <CyberFace
-              design={avatarDesign}
-              isSpeaking={isSpeaking || isThinking}
-              className="w-full max-w-md"
-            />
-          )}
+          </Suspense>
 
           {/* Speaking indicator */}
           {isSpeaking && (
