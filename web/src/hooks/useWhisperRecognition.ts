@@ -34,6 +34,7 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
   const audioChunksRef = useRef<Blob[]>([]);
   const transciberRef = useRef<unknown>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const wasCancelledRef = useRef(false);
   
   // Check browser support
   useEffect(() => {
@@ -91,38 +92,71 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
 
   // Process recorded audio with Whisper
   const processAudio = useCallback(async (audioBlob: Blob) => {
+    // Skip if cancelled or blob is too small (less than 1KB = likely no audio)
+    if (wasCancelledRef.current) {
+      console.log('[Whisper] Skipping processing - was cancelled');
+      setInterimTranscript('');
+      return;
+    }
+    
+    if (audioBlob.size < 1000) {
+      console.log('[Whisper] No audio captured (blob size:', audioBlob.size, ')');
+      setInterimTranscript('');
+      // Don't show error - just silently return since no audio was captured
+      return;
+    }
+    
     try {
       setInterimTranscript('Processing...');
       
       const transcriber = await loadModel();
       if (!transcriber) {
-        throw new Error('Transcriber not available');
+        setInterimTranscript('');
+        return;
       }
       
       // Convert blob to array buffer
       const arrayBuffer = await audioBlob.arrayBuffer();
       
       // Decode audio to get raw audio data
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      
-      // Get audio data as Float32Array (mono)
-      const audioData = audioBuffer.getChannelData(0);
-      
-      console.log('[Whisper] Processing audio...', audioData.length, 'samples');
-      
-      // Run transcription
-      const result = await (transcriber as (audio: Float32Array) => Promise<{ text: string }>)(audioData);
-      
-      console.log('[Whisper] Transcription result:', result);
-      
-      const text = result.text?.trim() || '';
-      if (text) {
-        setTranscript(text);
+      let audioContext: AudioContext | null = null;
+      try {
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // Get audio data as Float32Array (mono)
+        const audioData = audioBuffer.getChannelData(0);
+        
+        // Check if audio is too short (less than 0.5 seconds at 16kHz)
+        if (audioData.length < 8000) {
+          console.log('[Whisper] Audio too short:', audioData.length, 'samples');
+          setInterimTranscript('');
+          await audioContext.close();
+          return;
+        }
+        
+        console.log('[Whisper] Processing audio...', audioData.length, 'samples');
+        
+        // Run transcription
+        const result = await (transcriber as (audio: Float32Array) => Promise<{ text: string }>)(audioData);
+        
+        console.log('[Whisper] Transcription result:', result);
+        
+        const text = result.text?.trim() || '';
+        if (text) {
+          setTranscript(text);
+        }
+        setInterimTranscript('');
+        
+        await audioContext.close();
+      } catch (decodeErr) {
+        // Audio decode error - likely empty or corrupted audio, not a real error
+        console.log('[Whisper] Could not decode audio:', decodeErr);
+        setInterimTranscript('');
+        if (audioContext) {
+          await audioContext.close();
+        }
       }
-      setInterimTranscript('');
-      
-      await audioContext.close();
     } catch (err) {
       console.error('[Whisper] Processing error:', err);
       setError('Failed to process audio');
@@ -137,6 +171,7 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
     setTranscript('');
     setInterimTranscript('');
     audioChunksRef.current = [];
+    wasCancelledRef.current = false;
     
     try {
       // Pre-load model if not loaded
@@ -202,9 +237,14 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
 
   const cancelListening = useCallback(() => {
     console.log('[Whisper] Cancelling...');
+    
+    // Set cancelled flag BEFORE stopping so onstop handler knows to skip processing
+    wasCancelledRef.current = true;
+    
     setIsListening(false);
     setTranscript('');
     setInterimTranscript('');
+    setError(null);
     audioChunksRef.current = [];
     
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
