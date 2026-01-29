@@ -3,12 +3,22 @@ interface ListeningOverlayProps {
   finalTranscript: string;
   onCancel: () => void;
   onDone: () => void;
+  isLoadingModel?: boolean;
+  loadingProgress?: number;
 }
 
 /**
  * ListeningOverlay - Full-screen overlay shown while voice input is active
+ * Also handles model loading state for local Whisper recognition
  */
-export function ListeningOverlay({ interimTranscript, finalTranscript, onCancel, onDone }: ListeningOverlayProps) {
+export function ListeningOverlay({ 
+  interimTranscript, 
+  finalTranscript, 
+  onCancel, 
+  onDone,
+  isLoadingModel = false,
+  loadingProgress = 0,
+}: ListeningOverlayProps) {
   const displayText = finalTranscript + interimTranscript;
   const hasContent = displayText.length > 0;
   
@@ -35,28 +45,48 @@ export function ListeningOverlay({ interimTranscript, finalTranscript, onCancel,
         </div>
       </div>
 
-      {/* Listening text */}
-      <h2 className="text-2xl font-medium text-white mb-4 flex items-center gap-2">
-        Listening
-        <span className="flex gap-1">
-          <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '300ms' }} />
-        </span>
-      </h2>
+      {/* Status text */}
+      {isLoadingModel ? (
+        <>
+          <h2 className="text-2xl font-medium text-white mb-2">
+            Loading Speech Recognition
+          </h2>
+          <p className="text-sm text-slate-400 mb-4">
+            Downloading Whisper model (first time only)...
+          </p>
+          {/* Progress bar */}
+          <div className="w-64 h-2 bg-slate-700 rounded-full mb-8 overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-300"
+              style={{ width: `${loadingProgress}%` }}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <h2 className="text-2xl font-medium text-white mb-4 flex items-center gap-2">
+            Listening
+            <span className="flex gap-1">
+              <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '0ms' }} />
+              <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '150ms' }} />
+              <span className="w-2 h-2 bg-violet-400 rounded-full animate-thinking-dot" style={{ animationDelay: '300ms' }} />
+            </span>
+          </h2>
 
-      {/* Real-time transcript preview */}
-      <div className="max-w-md px-6 mb-8 min-h-[60px]">
-        {displayText ? (
-          <p className="text-lg text-slate-300 text-center italic">
-            "{displayText}"
-          </p>
-        ) : (
-          <p className="text-lg text-slate-500 text-center">
-            Start speaking...
-          </p>
-        )}
-      </div>
+          {/* Real-time transcript preview */}
+          <div className="max-w-md px-6 mb-8 min-h-[60px]">
+            {displayText ? (
+              <p className="text-lg text-slate-300 text-center italic">
+                "{displayText}"
+              </p>
+            ) : (
+              <p className="text-lg text-slate-500 text-center">
+                Start speaking...
+              </p>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Action buttons */}
       <div className="flex gap-3">

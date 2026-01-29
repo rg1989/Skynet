@@ -9,7 +9,7 @@ import { TranscribingIndicator } from './TranscribingIndicator';
 import { ListeningOverlay } from './ListeningOverlay';
 import { AvatarModeView } from './AvatarModeView';
 import { StreamingCodeBlock } from './StreamingCodeBlock';
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
+import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
 import { formatThoughtProcess } from '../utils/formatThoughtProcess';
 import { clearCurrentRun } from '../hooks/useWebSocket';
 
@@ -245,9 +245,11 @@ export function Chat() {
     avatarDesign,
   } = useStore();
 
-  // Speech recognition hook
+  // Speech recognition hook (local Whisper-based, no API key needed)
   const {
     isListening: speechIsListening,
+    isLoading: whisperLoading,
+    loadingProgress: whisperProgress,
     transcript,
     interimTranscript,
     isSupported: voiceSupported,
@@ -255,7 +257,7 @@ export function Chat() {
     startListening,
     stopListening,
     cancelListening,
-  } = useSpeechRecognition();
+  } = useWhisperRecognition();
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -636,13 +638,15 @@ export function Chat() {
         </div>
       )}
 
-      {/* Listening overlay - shown during voice input */}
-      {isListening && (
+      {/* Listening overlay - shown during voice input or model loading */}
+      {(isListening || whisperLoading) && (
         <ListeningOverlay
           interimTranscript={interimTranscript}
           finalTranscript={transcript}
           onCancel={handleCancelVoice}
           onDone={handleDoneVoice}
+          isLoadingModel={whisperLoading}
+          loadingProgress={whisperProgress}
         />
       )}
     </div>
