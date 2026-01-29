@@ -5,12 +5,14 @@ import { createAppServer } from './server/http.js';
 import { setScheduler, setAgentRunner, setProviderManager } from './server/routes.js';
 import { createProviderManager } from './providers/index.js';
 import { AgentRunner } from './agent/index.js';
-import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills, initializeSelfConfigSkills } from './skills/index.js';
+import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills, initializeSelfConfigSkills, initializeScheduleSkills } from './skills/index.js';
 import { TelegramBot } from './telegram/index.js';
 import { MemoryStore } from './memory/index.js';
 import { Scheduler } from './scheduler/index.js';
 import { detectPlatform, createHardwareAdapter } from './hardware/index.js';
 import { mkdirSync, existsSync } from 'fs';
+import { spawn, type ChildProcess } from 'child_process';
+import { join } from 'path';
 
 /**
  * Skynet Lite - Personal AI Assistant
@@ -145,7 +147,61 @@ async function main(): Promise<void> {
   );
   scheduler.start();
   setScheduler(scheduler);
+  
+  // Initialize schedule skills with scheduler instance
+  initializeScheduleSkills(scheduler);
   console.log(`Scheduler initialized with ${scheduler.getTasks().length} tasks`);
+
+  // Initialize Prefect bridge (auto-start if venv is set up)
+  let prefectProcess: ChildProcess | undefined;
+  const prefectDir = join(process.cwd(), 'prefect');
+  const venvPython = join(prefectDir, 'venv', 'bin', 'python');
+  const serverScript = join(prefectDir, 'server.py');
+  const prefectDisabled = config.prefect?.enabled === false || process.env.PREFECT_DISABLED === 'true';
+  
+  // Auto-start Prefect if venv exists (unless explicitly disabled)
+  if (!prefectDisabled && existsSync(venvPython) && existsSync(serverScript)) {
+    try {
+      prefectProcess = spawn(venvPython, [serverScript], {
+        cwd: prefectDir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+      });
+      
+      prefectProcess.stdout?.on('data', (data) => {
+        const msg = data.toString().trim();
+        if (msg) console.log(`[Prefect] ${msg}`);
+      });
+      
+      prefectProcess.stderr?.on('data', (data) => {
+        const msg = data.toString().trim();
+        // Filter out uvicorn startup noise
+        if (msg && !msg.includes('Started server process') && !msg.includes('Waiting for application')) {
+          console.error(`[Prefect] ${msg}`);
+        }
+      });
+      
+      prefectProcess.on('error', (err) => {
+        console.error('Failed to start Prefect bridge:', err.message);
+        prefectProcess = undefined;
+      });
+      
+      prefectProcess.on('exit', (code) => {
+        if (code !== 0 && code !== null) {
+          console.warn(`Prefect bridge exited with code ${code}`);
+        }
+        prefectProcess = undefined;
+      });
+      
+      console.log('Prefect bridge auto-starting (port 4201)...');
+    } catch (error) {
+      console.warn('Failed to start Prefect bridge:', error);
+    }
+  } else if (!prefectDisabled && existsSync(serverScript)) {
+    // Server script exists but venv not set up
+    console.log('Prefect available but not set up. To enable:');
+    console.log('  cd prefect && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt');
+  }
 
   // Initialize Telegram bot (if configured)
   let telegramBot: TelegramBot | undefined;
@@ -169,6 +225,11 @@ async function main(): Promise<void> {
     console.log(`\nReceived ${signal}, shutting down...`);
     
     scheduler.stop();
+    
+    if (prefectProcess) {
+      console.log('Stopping Prefect bridge...');
+      prefectProcess.kill('SIGTERM');
+    }
     
     if (telegramBot?.running) {
       await telegramBot.stop();
@@ -205,6 +266,7 @@ async function main(): Promise<void> {
   }
   console.log(`  Provider: ${config.providers.default}`);
   console.log(`  Telegram: ${telegramBot?.running ? 'connected' : 'not connected'}`);
+  console.log(`  Prefect: ${prefectProcess ? 'running (bridge at :4201)' : !prefectDisabled ? 'enabled (start manually)' : 'disabled'}`);
   console.log(`  Skills: ${skillRegistry.count} loaded`);
   console.log(`  Memory: ${config.agent.memory?.enabled ? 'enabled' : 'disabled'}`);
   console.log('');

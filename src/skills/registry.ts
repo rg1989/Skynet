@@ -7,6 +7,9 @@ import { visionSkills } from './vision.js';
 import { audioSkills } from './audio.js';
 import { gmailSkills } from './gmail.js';
 import { selfConfigSkills } from './self-config.js';
+import { layoutSkills } from './layout.js';
+import { scheduleSkills } from './schedule.js';
+import { prefectSkills } from './prefect.js';
 
 /**
  * Skill Registry - manages all available skills
@@ -85,6 +88,9 @@ export function createCoreSkillRegistry(): SkillRegistry {
   registry.registerAll(audioSkills);
   registry.registerAll(gmailSkills);
   registry.registerAll(selfConfigSkills);
+  registry.registerAll(layoutSkills);
+  registry.registerAll(scheduleSkills);
+  registry.registerAll(prefectSkills);
   
   return registry;
 }
@@ -98,3 +104,6 @@ export { visionSkills } from './vision.js';
 export { audioSkills } from './audio.js';
 export { gmailSkills } from './gmail.js';
 export { selfConfigSkills } from './self-config.js';
+export { layoutSkills } from './layout.js';
+export { scheduleSkills } from './schedule.js';
+export { prefectSkills } from './prefect.js';

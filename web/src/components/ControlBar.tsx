@@ -7,6 +7,8 @@ interface ControlBarProps {
   onStop: () => void;
   onVoiceInput?: () => void;
   voiceSupported?: boolean;
+  /** History of user messages for up/down arrow navigation */
+  messageHistory?: string[];
 }
 
 export function ControlBar({
@@ -16,6 +18,7 @@ export function ControlBar({
   onStop,
   onVoiceInput,
   voiceSupported = false,
+  messageHistory = [],
 }: ControlBarProps) {
   return (
     <div className="border-t border-slate-700/50 px-6 py-3 bg-[#1e2227]">
@@ -27,7 +30,8 @@ export function ControlBar({
               onSend={onSendText} 
               onVoiceInput={onVoiceInput}
               voiceSupported={voiceSupported}
-              disabled={isProcessing || isDisabled} 
+              disabled={isProcessing || isDisabled}
+              messageHistory={messageHistory}
             />
           </div>
           {isProcessing && (

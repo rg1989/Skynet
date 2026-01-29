@@ -15,6 +15,7 @@ export interface AgentRunParams {
   message: string;
   sessionKey: string;
   provider?: LLMProvider;
+  persona?: string; // Persona ID (e.g., 'hawking', 'default')
   media?: {
     type: string;
     base64?: string;
@@ -139,6 +140,7 @@ export class AgentRunner {
         skills: this.getSkills(),
         toolsEnabled,
         toolsMode,
+        persona: params.persona,
       });
 
       // Get provider (dynamically from runtime config)

@@ -117,6 +117,7 @@ export type WSEventType =
   | 'memory:recalled'
   | 'hardware:capture'
   | 'hardware:audio'
+  | 'layout:update'
   | 'task:created'
   | 'task:updated'
   | 'task:deleted'

@@ -140,7 +140,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
 
   // Send a message to the agent (for web UI)
   router.post('/chat', async (req: Request, res: Response) => {
-    const { message, sessionKey } = req.body;
+    const { message, sessionKey, persona } = req.body;
     
     if (!message) {
       res.status(400).json({ error: 'Message is required' });
@@ -156,6 +156,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const result = await agentRunner.run({
         message,
         sessionKey: sessionKey || 'web-default',
+        persona: persona || undefined,
       });
       
       res.json({

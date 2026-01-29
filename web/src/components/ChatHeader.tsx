@@ -6,8 +6,22 @@ interface ChatHeaderProps {
   title?: string;
 }
 
+// Robot face icon for Avatar Mode
+function AvatarModeIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <rect x="4" y="6" width="16" height="14" rx="3" strokeWidth={1.5} />
+      <circle cx="9" cy="12" r="2" fill="currentColor" />
+      <circle cx="15" cy="12" r="2" fill="currentColor" />
+      <path d="M9 16h6" strokeWidth={1.5} strokeLinecap="round" />
+      <line x1="12" y1="6" x2="12" y2="3" strokeWidth={1.5} strokeLinecap="round" />
+      <circle cx="12" cy="2" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function ChatHeader({ isConnected, title = 'Skynet' }: ChatHeaderProps) {
-  const { settings, setSettings } = useStore();
+  const { settings, setSettings, avatarModeEnabled, setAvatarModeEnabled } = useStore();
 
   // Fetch current provider/model on mount
   useEffect(() => {
@@ -57,6 +71,20 @@ export function ChatHeader({ isConnected, title = 'Skynet' }: ChatHeaderProps) {
         )}
       </div>
       <div className="flex items-center gap-3">
+        {/* Avatar Mode toggle */}
+        <button
+          onClick={() => setAvatarModeEnabled(!avatarModeEnabled)}
+          className={`px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            avatarModeEnabled
+              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-600/50 hover:text-slate-300'
+          }`}
+          title={avatarModeEnabled ? 'Exit Avatar Mode' : 'Enter Avatar Mode'}
+        >
+          <AvatarModeIcon />
+          <span className="text-sm">Avatar</span>
+        </button>
+
         {/* Connection status */}
         <div className={`flex items-center gap-2 text-sm ${
           isConnected ? 'text-emerald-400' : 'text-red-400'

@@ -87,6 +87,12 @@ const gmailSchema = z.object({
   tokenPath: z.string().optional(),
 });
 
+const prefectSchema = z.object({
+  enabled: z.boolean().default(false),
+  bridgeUrl: z.string().default('http://localhost:4201'),
+  autoStart: z.boolean().default(false), // Auto-start the bridge server
+});
+
 export const configSchema = z.object({
   server: serverSchema.default({ port: 3000, host: 'localhost' }),
   telegram: telegramSchema,
@@ -94,6 +100,7 @@ export const configSchema = z.object({
   agent: agentSchema.default({ maxTokens: 4096 }),
   hardware: hardwareSchema.optional(),
   gmail: gmailSchema.optional(),
+  prefect: prefectSchema.optional(),
   dataDir: z.string().default('./data'),
 });
 
@@ -104,3 +111,4 @@ export type ProvidersConfig = z.infer<typeof providersSchema>;
 export type AgentConfig = z.infer<typeof agentSchema>;
 export type HardwareConfig = z.infer<typeof hardwareSchema>;
 export type GmailConfig = z.infer<typeof gmailSchema>;
+export type PrefectConfig = z.infer<typeof prefectSchema>;

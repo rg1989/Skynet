@@ -1,6 +1,7 @@
 import type { Message, Session, Skill } from '../types/index.js';
 import type { Config } from '../config/schema.js';
 import { getRuntimeConfig } from '../config/runtime.js';
+import { getPersona } from './personas.js';
 
 /**
  * Context builder - assembles messages for LLM
@@ -16,6 +17,7 @@ export interface ContextBuildParams {
   maxTokens?: number;
   toolsEnabled?: boolean;
   toolsMode?: ToolsMode;
+  persona?: string; // Persona ID (e.g., 'hawking', 'default')
 }
 
 export interface BuiltContext {
@@ -145,16 +147,22 @@ IMPORTANT:
 /**
  * Build system prompt
  */
-function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: Skill[], allSkills: Skill[]): string {
+function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: Skill[], allSkills: Skill[], personaId?: string): string {
+  // Check for persona-specific prompt
+  const persona = personaId ? getPersona(personaId) : null;
+  const personaPrompt = persona?.systemPrompt;
+
   // If tools are disabled, use a simpler prompt without tool mentions
   if (toolsMode === 'disabled') {
-    return config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
+    // Use persona prompt if available, otherwise default
+    return personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
 
 Be helpful, accurate, and conversational. Answer questions directly and naturally.
 Do not attempt to use tools, functions, or output JSON - just respond in plain text.`;
   }
 
-  const basePrompt = config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
+  // Use persona prompt as base if available
+  const basePrompt = personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
 
 You have access to various tools to help the user with tasks. Most tools are disabled by default to keep API calls lightweight, but you can enable any tool you need using the \`enable_tool\` skill.
 
@@ -203,7 +211,7 @@ function estimateTokens(text: string): number {
  * Build context for agent execution
  */
 export function buildContext(params: ContextBuildParams): BuiltContext {
-  const { session, config, skills, toolsEnabled = true } = params;
+  const { session, config, skills, toolsEnabled = true, persona } = params;
   
   // Determine tools mode
   let toolsMode: ToolsMode = params.toolsMode || 'hybrid';
@@ -216,7 +224,7 @@ export function buildContext(params: ContextBuildParams): BuiltContext {
   const enabledSkills = skills.filter(s => runtimeConfig.isToolEnabled(s.name));
   
   // Build system prompt with tool knowledge (all skills) and instructions (enabled only)
-  const systemPrompt = buildSystemPrompt(config, toolsMode, enabledSkills, skills);
+  const systemPrompt = buildSystemPrompt(config, toolsMode, enabledSkills, skills, persona);
   
   // Start with system message
   const messages: Message[] = [

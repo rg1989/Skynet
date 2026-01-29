@@ -6,6 +6,8 @@ interface InputBarProps {
   disabled?: boolean;
   voiceSupported?: boolean;
   placeholder?: string;
+  /** History of user messages for up/down arrow navigation */
+  messageHistory?: string[];
 }
 
 export function InputBar({ 
@@ -13,10 +15,19 @@ export function InputBar({
   onVoiceInput,
   disabled = false, 
   voiceSupported = false,
-  placeholder = 'Type a message...' 
+  placeholder = 'Type a message...',
+  messageHistory = [],
 }: InputBarProps) {
   const [text, setText] = useState('');
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [savedInput, setSavedInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset history navigation when a new message is sent
+  useEffect(() => {
+    setHistoryIndex(-1);
+    setSavedInput('');
+  }, [messageHistory.length]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -32,13 +43,91 @@ export function InputBar({
     if (trimmed && !disabled) {
       onSend(trimmed);
       setText('');
+      setHistoryIndex(-1);
+      setSavedInput('');
     }
+  };
+
+  // Check if cursor is on the first line of text
+  const isCursorOnFirstLine = (): boolean => {
+    const textarea = textareaRef.current;
+    if (!textarea) return true;
+    
+    const cursorPos = textarea.selectionStart;
+    const textBeforeCursor = text.substring(0, cursorPos);
+    
+    // If there's no newline before cursor, we're on the first line
+    return !textBeforeCursor.includes('\n');
+  };
+
+  // Check if cursor is on the last line of text
+  const isCursorOnLastLine = (): boolean => {
+    const textarea = textareaRef.current;
+    if (!textarea) return true;
+    
+    const cursorPos = textarea.selectionStart;
+    const textAfterCursor = text.substring(cursorPos);
+    
+    // If there's no newline after cursor, we're on the last line
+    return !textAfterCursor.includes('\n');
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+      return;
+    }
+
+    // Up arrow - navigate to older messages only when cursor is on the first line
+    if (e.key === 'ArrowUp' && messageHistory.length > 0) {
+      const onFirstLine = isCursorOnFirstLine();
+      
+      if (onFirstLine) {
+        e.preventDefault();
+        
+        // Save current input if we're just starting to navigate
+        if (historyIndex === -1) {
+          setSavedInput(text);
+        }
+        
+        // Move up in history (older messages)
+        const newIndex = Math.min(historyIndex + 1, messageHistory.length - 1);
+        if (newIndex !== historyIndex) {
+          setHistoryIndex(newIndex);
+          setText(messageHistory[messageHistory.length - 1 - newIndex]);
+        }
+      }
+    }
+
+    // Down arrow - navigate to newer messages only when cursor is on the last line
+    if (e.key === 'ArrowDown' && historyIndex >= 0) {
+      const onLastLine = isCursorOnLastLine();
+      
+      if (onLastLine) {
+        e.preventDefault();
+        
+        const newIndex = historyIndex - 1;
+        if (newIndex >= 0) {
+          // Move down in history (newer messages)
+          setHistoryIndex(newIndex);
+          setText(messageHistory[messageHistory.length - 1 - newIndex]);
+        } else {
+          // Back to current input
+          setHistoryIndex(-1);
+          setText(savedInput);
+        }
+      }
+    }
+  };
+
+  // Reset history index when user manually types
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    // If user types while navigating history, exit history mode
+    if (historyIndex >= 0) {
+      setHistoryIndex(-1);
+      setSavedInput('');
     }
   };
 
@@ -47,7 +136,7 @@ export function InputBar({
       <textarea
         ref={textareaRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         readOnly={disabled}

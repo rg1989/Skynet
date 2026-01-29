@@ -32,6 +32,8 @@ export interface Message {
   timestamp: number;
   thinking?: boolean;
   toolCalls?: { name: string; status: 'running' | 'done'; result?: string }[];
+  /** Thought process / steps the AI took while generating this response */
+  thoughtProcess?: string;
 }
 
 export interface SessionInfo {
@@ -66,6 +68,11 @@ export interface ToolInfo {
 
 export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
 
+export type AvatarDesign = 'geometric' | 'holographic' | 'android' | 'image';
+
+// LocalStorage key for avatar mode settings
+const STORAGE_KEY_AVATAR = 'skynet_avatar_mode';
+
 export interface Settings {
   // Provider/Model
   currentProvider: string;
@@ -84,6 +91,32 @@ export interface Settings {
   // Loading states
   loading: boolean;
   warmingUp: boolean;
+}
+
+// Get initial avatar mode settings from localStorage
+function getInitialAvatarSettings(): {
+  enabled: boolean;
+  design: AvatarDesign;
+  ttsEnabled: boolean;
+} {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_AVATAR);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+    // localStorage not available or invalid JSON
+  }
+  return { enabled: false, design: 'image', ttsEnabled: true };
+}
+
+// Save avatar settings to localStorage
+function saveAvatarSettings(settings: { enabled: boolean; design: AvatarDesign; ttsEnabled: boolean }): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_AVATAR, JSON.stringify(settings));
+  } catch {
+    // localStorage not available
+  }
 }
 
 interface AppState {
@@ -140,6 +173,20 @@ interface AppState {
   // Legacy provider (for backwards compatibility)
   provider: string;
   setProvider: (provider: string) => void;
+
+  // Avatar Mode
+  avatarModeEnabled: boolean;
+  setAvatarModeEnabled: (enabled: boolean) => void;
+  avatarDesign: AvatarDesign;
+  setAvatarDesign: (design: AvatarDesign) => void;
+  avatarRatio: number; // 0.2 to 0.8, default 0.4 (40% avatar, 60% chat)
+  setAvatarRatio: (ratio: number) => void;
+  showContent: boolean;
+  setShowContent: (show: boolean) => void;
+  contentUrl: string | null;
+  setContentUrl: (url: string | null) => void;
+  ttsEnabled: boolean;
+  setTtsEnabled: (enabled: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -231,4 +278,33 @@ export const useStore = create<AppState>((set) => ({
   // Legacy provider (for backwards compatibility) - empty by default
   provider: '',
   setProvider: (provider) => set({ provider }),
+
+  // Avatar Mode - initialized from localStorage
+  avatarModeEnabled: getInitialAvatarSettings().enabled,
+  setAvatarModeEnabled: (enabled) => {
+    set((state) => {
+      saveAvatarSettings({ enabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled });
+      return { avatarModeEnabled: enabled };
+    });
+  },
+  avatarDesign: getInitialAvatarSettings().design,
+  setAvatarDesign: (design) => {
+    set((state) => {
+      saveAvatarSettings({ enabled: state.avatarModeEnabled, design, ttsEnabled: state.ttsEnabled });
+      return { avatarDesign: design };
+    });
+  },
+  avatarRatio: 0.4, // 40% avatar, 60% chat
+  setAvatarRatio: (ratio) => set({ avatarRatio: Math.min(0.8, Math.max(0.2, ratio)) }),
+  showContent: false,
+  setShowContent: (show) => set({ showContent: show }),
+  contentUrl: null,
+  setContentUrl: (url) => set({ contentUrl: url }),
+  ttsEnabled: getInitialAvatarSettings().ttsEnabled,
+  setTtsEnabled: (enabled) => {
+    set((state) => {
+      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: enabled });
+      return { ttsEnabled: enabled };
+    });
+  },
 }));

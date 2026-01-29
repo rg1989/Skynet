@@ -1,4 +1,4 @@
-export { SkillRegistry, createCoreSkillRegistry, fileSkills, execSkills, webSkills, memorySkills, visionSkills, audioSkills, gmailSkills, selfConfigSkills } from './registry.js';
+export { SkillRegistry, createCoreSkillRegistry, fileSkills, execSkills, webSkills, memorySkills, visionSkills, audioSkills, gmailSkills, selfConfigSkills, scheduleSkills, prefectSkills } from './registry.js';
 export { readFileSkill, writeFileSkill, editFileSkill, listDirectorySkill } from './file-ops.js';
 export { execSkill } from './exec.js';
 export { webFetchSkill, webSearchSkill } from './web-browse.js';
@@ -48,3 +48,19 @@ export {
   getSystemPromptSkill,
   setSystemPromptSkill,
 } from './self-config.js';
+export {
+  initializeScheduleSkills,
+  getScheduler,
+  createScheduledTaskSkill,
+  listScheduledTasksSkill,
+  updateScheduledTaskSkill,
+  deleteScheduledTaskSkill,
+  triggerScheduledTaskSkill,
+} from './schedule.js';
+export {
+  prefectCreateFlowSkill,
+  prefectRunFlowSkill,
+  prefectListFlowsSkill,
+  prefectGetRunsSkill,
+  prefectDeleteFlowSkill,
+} from './prefect.js';

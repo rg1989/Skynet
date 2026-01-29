@@ -1,5 +1,6 @@
 import { memo, useState } from 'react';
 import type { Message } from '../store';
+import { formatThoughtProcess } from '../utils/formatThoughtProcess';
 
 interface ChatMessageProps {
   message: Message;
@@ -155,6 +156,48 @@ function TextWithLinks({ text, className }: { text: string; className?: string }
   );
 }
 
+// Thought process box - displays the steps the AI took
+function ThoughtProcessBox({ content }: { content: string }) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const steps = formatThoughtProcess(content);
+  
+  if (steps.length === 0) return null;
+  
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors mb-2"
+      >
+        <svg 
+          className={`w-3 h-3 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} 
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <span className="font-medium">Thought Process</span>
+        <span className="text-slate-500">({steps.length} step{steps.length !== 1 ? 's' : ''})</span>
+      </button>
+      
+      {!isCollapsed && (
+        <div className="bg-slate-800/50 rounded-lg border border-slate-600/30 p-3 text-xs">
+          {steps.map((step, index) => (
+            <div 
+              key={index} 
+              className="text-slate-400 leading-relaxed py-1.5 border-b border-slate-700/50 last:border-b-0"
+            >
+              <span className="text-emerald-500/70 mr-2 font-medium">{index + 1}.</span>
+              {step}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -199,6 +242,11 @@ export const ChatMessage = memo(function ChatMessage({ message }: ChatMessagePro
                   : 'bg-[#2a2d32] text-slate-100 rounded-tl-md border border-emerald-500/20 shadow-lg shadow-emerald-500/10'
           }`}
         >
+          {/* Thought process section - shown for assistant messages with thought process */}
+          {!isUser && !isSystem && message.thoughtProcess && (
+            <ThoughtProcessBox content={message.thoughtProcess} />
+          )}
+          
           {isToolCall ? (
             <div>
               <div className="flex items-center gap-2 text-amber-400 text-sm font-medium">

@@ -16,3 +16,13 @@ web/dist/
 # Optional: IDE and OS files
 .DS_Store
 *.log
+
+# Prefect
+prefect/venv/
+prefect/data/
+prefect/logs/
+prefect/artifacts/
+prefect/results/
+prefect/reports/
+prefect/tests/
+prefect/tests/

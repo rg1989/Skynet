@@ -43,6 +43,9 @@ export function useWebSocket() {
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
+    setAvatarRatio,
+    setShowContent,
+    setContentUrl,
   } = useStore();
 
   useEffect(() => {
@@ -86,7 +89,9 @@ export function useWebSocket() {
 
         case 'agent:tool_start':
           if (currentRunId && p.runId === currentRunId) {
-            setIsThinking(false); // Tool started, not just thinking
+            // Keep isThinking true - we still want to show the thinking indicator
+            // until actual content starts streaming. This prevents the gap where
+            // nothing is displayed between thinking and streaming.
             addActiveTool(p.name as string, p.params);
           }
           break;
@@ -106,6 +111,26 @@ export function useWebSocket() {
             clearActiveTools();
           }
           break;
+
+        case 'layout:update': {
+          // Handle layout updates from the agent (for Avatar Mode)
+          const layoutPayload = p as {
+            avatar_ratio?: number;
+            show_content?: boolean;
+            content_url?: string;
+          };
+          
+          if (layoutPayload.avatar_ratio !== undefined) {
+            setAvatarRatio(layoutPayload.avatar_ratio);
+          }
+          if (layoutPayload.show_content !== undefined) {
+            setShowContent(layoutPayload.show_content);
+          }
+          if (layoutPayload.content_url !== undefined) {
+            setContentUrl(layoutPayload.content_url);
+          }
+          break;
+        }
 
         default:
           // Ignore unhandled events
@@ -185,6 +210,9 @@ export function useWebSocket() {
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
+    setAvatarRatio,
+    setShowContent,
+    setContentUrl,
   ]);
 
   const sendMessage = (type: string, payload: unknown) => {

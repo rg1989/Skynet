@@ -1,0 +1,9 @@
+# Prefect workflow orchestration
+prefect>=3.0.0
+
+# FastAPI for bridge server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# For executing shell commands and HTTP requests within flows
+httpx>=0.25.0
