@@ -8,37 +8,210 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import { TranscribingIndicator } from './TranscribingIndicator';
 import { ListeningOverlay } from './ListeningOverlay';
 import { AvatarModeView } from './AvatarModeView';
+import { StreamingCodeBlock } from './StreamingCodeBlock';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { formatThoughtProcess } from '../utils/formatThoughtProcess';
+import { clearCurrentRun } from '../hooks/useWebSocket';
 
 /**
- * StreamingContent - Displays streaming content with formatted steps and loading indicator
+ * Segment types for parsed streaming content
  */
-function StreamingContent({ content }: { content: string }) {
-  const formattedSteps = formatThoughtProcess(content);
+type StreamingSegment = 
+  | { type: 'text'; content: string }
+  | { type: 'code'; language: string; code: string; isComplete: boolean };
+
+/**
+ * Parse streaming content to detect code blocks (complete and incomplete)
+ * Returns an array of segments that can be rendered appropriately
+ */
+function parseStreamingContent(content: string): StreamingSegment[] {
+  const segments: StreamingSegment[] = [];
+  
+  // Regex to match code blocks - both complete and incomplete
+  // Complete: ```language\ncode\n```
+  // Incomplete: ```language\ncode (no closing ```)
+  const codeBlockPattern = /```(\w*)\n([\s\S]*?)```|```(\w*)\n?([\s\S]*)$/g;
+  
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = codeBlockPattern.exec(content)) !== null) {
+    // Add text before this code block
+    if (match.index > lastIndex) {
+      const textBefore = content.substring(lastIndex, match.index).trim();
+      if (textBefore) {
+        segments.push({ type: 'text', content: textBefore });
+      }
+    }
+    
+    // Determine if this is a complete or incomplete code block
+    const isComplete = match[1] !== undefined; // Complete blocks match first alternative
+    const language = isComplete ? match[1] : (match[3] || '');
+    const code = isComplete ? match[2] : (match[4] || '');
+    
+    segments.push({
+      type: 'code',
+      language: language || 'text',
+      code: code.trim(),
+      isComplete,
+    });
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Add any remaining text after the last code block
+  if (lastIndex < content.length) {
+    const remainingText = content.substring(lastIndex).trim();
+    if (remainingText) {
+      segments.push({ type: 'text', content: remainingText });
+    }
+  }
+  
+  // If no code blocks found, return entire content as text
+  if (segments.length === 0 && content.trim()) {
+    segments.push({ type: 'text', content: content.trim() });
+  }
+  
+  return segments;
+}
+
+// Thinking icon for streaming content
+function ThinkingIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+    </svg>
+  );
+}
+
+/**
+ * FilmReelThoughtStep - Shows one thought step at a time with slide animation
+ * Like a film reel, steps slide up and out as new ones slide in from below
+ */
+function FilmReelThoughtStep({ 
+  steps, 
+  isClosing = false 
+}: { 
+  steps: string[]; 
+  isClosing?: boolean;
+}) {
+  const prevStepCountRef = useRef(0);
+  const [displayStep, setDisplayStep] = useState<{ text: string; index: number } | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [animationKey, setAnimationKey] = useState(0);
+  
+  // Get the current (last) step
+  const currentStep = steps.length > 0 ? steps[steps.length - 1] : null;
+  const currentIndex = steps.length;
+  
+  useEffect(() => {
+    if (currentStep && currentIndex > prevStepCountRef.current) {
+      // New step arrived - trigger animation
+      if (displayStep) {
+        setIsAnimating(true);
+        // After exit animation, show new step with enter animation
+        setTimeout(() => {
+          setDisplayStep({ text: currentStep, index: currentIndex });
+          setAnimationKey(prev => prev + 1);
+          setIsAnimating(false);
+        }, 250); // Match animation duration
+      } else {
+        // First step - just show it
+        setDisplayStep({ text: currentStep, index: currentIndex });
+      }
+      prevStepCountRef.current = currentIndex;
+    }
+  }, [currentStep, currentIndex, displayStep]);
+  
+  if (!displayStep) return null;
   
   return (
-    <div className="text-sm text-slate-100 leading-relaxed">
-      {formattedSteps.map((step, index) => (
-        <div key={index} className="mb-1 last:mb-0">
-          {step}
-        </div>
-      ))}
-      {/* Three-dot loading indicator */}
-      <div className="flex items-center gap-1 mt-2">
-        <span 
-          className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-thinking-dot"
-          style={{ animationDelay: '0ms' }}
-        />
-        <span 
-          className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-thinking-dot"
-          style={{ animationDelay: '150ms' }}
-        />
-        <span 
-          className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-thinking-dot"
-          style={{ animationDelay: '300ms' }}
-        />
+    <div className="relative h-8 overflow-hidden">
+      <div
+        key={animationKey}
+        className={`absolute inset-0 flex items-center text-xs text-slate-400 italic truncate ${
+          isAnimating 
+            ? 'animate-slide-up-out' 
+            : 'animate-slide-up-in'
+        } ${isClosing ? 'opacity-50' : ''}`}
+      >
+        <span className="text-slate-500 mr-2 font-medium not-italic flex-shrink-0">
+          {displayStep.index}.
+        </span>
+        <span className="truncate">{displayStep.text}</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * StreamingContent - Film reel style display showing one thought step at a time
+ * Steps slide up and out as new ones arrive, creating a smooth film reel effect.
+ * Fixed height to match collapsed ThoughtProcessBox for seamless transition.
+ */
+function StreamingContent({ content, isClosing = false }: { content: string; isClosing?: boolean }) {
+  const segments = parseStreamingContent(content);
+  
+  // Collect all text steps from segments
+  const allSteps: string[] = [];
+  let hasCodeBlock = false;
+  
+  for (const segment of segments) {
+    if (segment.type === 'text') {
+      const steps = formatThoughtProcess(segment.content);
+      allSteps.push(...steps);
+    } else if (segment.type === 'code') {
+      hasCodeBlock = true;
+    }
+  }
+  
+  return (
+    <div className="text-sm">
+      {/* Header row - matches ThoughtProcessBox collapsed button height */}
+      <div className="flex items-center gap-2 text-xs text-slate-500">
+        {/* Chevron icon (matches collapsed state) */}
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <ThinkingIcon />
+        <span className="font-medium">Thought Process</span>
+        {/* Step counter with loading indicator */}
+        <span className="text-slate-600 flex items-center gap-1.5">
+          ({allSteps.length} step{allSteps.length !== 1 ? 's' : ''})
+          {!isClosing && (
+            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+          )}
+        </span>
+      </div>
+      
+      {/* Film reel single step display - fixed height */}
+      {allSteps.length > 0 && !isClosing && (
+        <div className="mt-2 bg-slate-900/60 rounded-lg border border-slate-700/40 px-3 py-2">
+          <FilmReelThoughtStep 
+            steps={allSteps} 
+            isClosing={isClosing}
+          />
+        </div>
+      )}
+      
+      {/* Code block placeholder if generating code/diagram */}
+      {hasCodeBlock && !isClosing && (
+        <div className="mt-2">
+          {segments.map((segment, index) => {
+            if (segment.type === 'code') {
+              return (
+                <StreamingCodeBlock
+                  key={index}
+                  language={segment.language}
+                  code={segment.code}
+                  isComplete={segment.isComplete}
+                />
+              );
+            }
+            return null;
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -46,6 +219,7 @@ function StreamingContent({ content }: { content: string }) {
 export function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [initialized, setInitialized] = useState(false);
+  const [isStreamingClosing, setIsStreamingClosing] = useState(false);
   
   const { 
     messages, 
@@ -128,11 +302,12 @@ export function Chat() {
       
       if (data.messages && data.messages.length > 0) {
         // Convert backend messages to frontend format
-        const formattedMessages: Message[] = data.messages.map((msg: { role: string; content: string; timestamp: number }, index: number) => ({
+        const formattedMessages: Message[] = data.messages.map((msg: { role: string; content: string; timestamp: number; thoughtProcess?: string }, index: number) => ({
           id: `msg_${msg.timestamp}_${index}`,
           role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content,
           timestamp: msg.timestamp,
+          thoughtProcess: msg.thoughtProcess,
         }));
         setMessages(formattedMessages);
       } else {
@@ -238,28 +413,41 @@ export function Chat() {
 
       const data = await response.json();
       
-      // Capture the thought process before clearing
+      // Capture the thought process before clearing state
       // Use getState() to get the current value since thinkingContent from hook may be stale
       const capturedThoughtProcess = useStore.getState().thinkingContent;
       
-      // Clear thinking/streaming state and add the final response
-      setIsThinking(false);
-      setThinkingContent('');
-      setActiveRunId(null);
-      
       if (data.response) {
-        addMessage({
-          id: `msg_${Date.now()}`,
-          role: 'assistant',
-          content: data.response,
-          timestamp: Date.now(),
-          // Always include thought process if we captured any streaming content
-          // This preserves the step-by-step work the AI did
-          thoughtProcess: capturedThoughtProcess?.trim() || undefined,
-        });
+        // Trigger closing animation on streaming content
+        // The streaming view fades out quickly (300ms) to match transition-opacity duration
+        setIsStreamingClosing(true);
         
-        // Refresh sessions list to update message counts
-        refreshSessions();
+        // Wait for fade animation to complete, then add final message
+        // The final message appears with the same thought process header (collapsed)
+        // creating a seamless visual transition
+        setTimeout(() => {
+          // Clear streaming state
+          clearCurrentRun();
+          setIsThinking(false);
+          setThinkingContent('');
+          setActiveRunId(null);
+          clearActiveTools();
+          setIsStreamingClosing(false);
+          
+          // Now add the final message with captured thought process
+          addMessage({
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: data.response,
+            timestamp: Date.now(),
+            // Always include thought process if we captured any streaming content
+            // This preserves the step-by-step work the AI did
+            thoughtProcess: capturedThoughtProcess?.trim() || undefined,
+          });
+          
+          // Refresh sessions list to update message counts
+          refreshSessions();
+        }, 300); // Match the 300ms transition-opacity duration
       } else if (data.error) {
         addMessage({
           id: `msg_${Date.now()}`,
@@ -267,12 +455,21 @@ export function Chat() {
           content: `Error: ${data.error}`,
           timestamp: Date.now(),
         });
+        // Clear state on error since there won't be an agent:end event
+        clearCurrentRun();
+        setIsThinking(false);
+        setThinkingContent('');
+        setActiveRunId(null);
+        clearActiveTools();
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      // Clear all state on network error since there won't be an agent:end event
+      clearCurrentRun();
       setIsThinking(false);
       setThinkingContent('');
       setActiveRunId(null);
+      clearActiveTools();
       addMessage({
         id: `msg_${Date.now()}`,
         role: 'system',
@@ -280,10 +477,12 @@ export function Chat() {
         timestamp: Date.now(),
       });
     }
-  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, currentSessionKey, refreshSessions, avatarModeEnabled, avatarDesign]);
+  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, clearActiveTools, currentSessionKey, refreshSessions, avatarModeEnabled, avatarDesign]);
 
   const handleStop = useCallback(() => {
-    // TODO: Implement cancel via API
+    // Clear module-level WebSocket state to stop processing incoming events
+    clearCurrentRun();
+    // Clear React/Zustand state
     setActiveRunId(null);
     setIsThinking(false);
     setThinkingContent('');
@@ -394,9 +593,16 @@ export function Chat() {
               {/* Thinking indicator - shown while waiting for first token or during tool execution */}
               {(isThinking || activeTools.length > 0) && !thinkingContent && <ThinkingIndicator />}
               
-              {/* Streaming content - shown when tokens start arriving */}
+              {/* Streaming content - Film reel thought process display */}
+              {/* Styled to match the collapsed ThoughtProcessBox in final messages */}
+              {/* Height stays consistent for seamless transition to final message */}
               {thinkingContent && (
-                <div className="flex gap-3 mb-5">
+                <div 
+                  className={`flex gap-3 mb-5 transition-opacity duration-300 ease-out ${
+                    isStreamingClosing ? 'opacity-0' : 'opacity-100'
+                  }`}
+                >
+                  {/* Bot avatar */}
                   <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
                     <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
@@ -407,8 +613,9 @@ export function Chat() {
                       <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
                     </svg>
                   </div>
-                  <div className="bg-[#2a2d32] rounded-2xl rounded-tl-md px-4 py-3 border border-emerald-500/20 shadow-lg shadow-emerald-500/10 max-w-[75%]">
-                    <StreamingContent content={thinkingContent} />
+                  {/* Message bubble - matches ChatMessage assistant bubble */}
+                  <div className="bg-[#2a2d32] rounded-2xl rounded-tl-md px-4 py-3 border border-slate-600/30 max-w-[75%]">
+                    <StreamingContent content={thinkingContent} isClosing={isStreamingClosing} />
                   </div>
                 </div>
               )}

@@ -1,0 +1,86 @@
+# Morning Briefing System Configuration
+
+# General briefing settings
+briefing:
+  timezone: "America/New_York"
+  output_format: "text"  # text, json, html
+  include_icons: true
+  include_recommendations: true
+  max_runtime_seconds: 120
+
+# Google Calendar settings
+calendar:
+  enabled: true
+  calendars:
+    - "primary"  # Your main calendar
+    # - "work@company.com"  # Additional calendars
+  max_events: 20
+  include_all_day: true
+  include_declined: false
+  time_range_hours: 24  # Look ahead hours
+  
+# Gmail settings
+email:
+  enabled: true
+  max_emails: 50
+  time_range_hours: 24
+  priority_keywords:
+    - "urgent"
+    - "asap"
+    - "deadline"
+    - "important"
+    - "action required"
+  exclude_categories:
+    - "promotions"
+    - "social"
+    - "forums"
+  include_attachments_info: true
+  
+# Weather settings
+weather:
+  enabled: true
+  include_forecast: true
+  include_hourly: false
+  include_alerts: true
+  units: "imperial"  # imperial, metric
+  # location: "New York, NY"  # Leave empty for auto-detection
+  
+# AI Enhancement settings (optional)
+ai:
+  enabled: false  # Set to true if you have OpenAI API key
+  model: "gpt-3.5-turbo"
+  summary_style: "brief"  # brief, detailed, comprehensive
+  max_tokens: 500
+  temperature: 0.3
+
+# Output settings
+output:
+  save_to_file: true
+  file_path: "briefings/briefing_{date}.txt"
+  create_json_backup: true
+  email_briefing: false
+  email_recipients: []
+  include_metadata: true
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  console_output: true
+  file_output: true
+  log_file: "logs/morning_briefing.log"
+  max_size_mb: 10
+  backup_count: 5
+  
+# Error handling
+error_handling:
+  retry_attempts: 3
+  retry_delay_seconds: 5
+  continue_on_api_failure: true
+  fallback_mode: true
+
+# Performance settings
+performance:
+  enable_caching: true
+  cache_duration_minutes: 15
+  concurrent_requests: true
+  request_timeout_seconds: 30

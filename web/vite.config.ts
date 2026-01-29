@@ -28,6 +28,12 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // Proxy Prefect Bridge requests
+      '/prefect': {
+        target: 'http://localhost:4201',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/prefect/, ''),
+      },
     },
   },
   build: {

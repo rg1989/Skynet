@@ -1,0 +1,53 @@
+---
+description: Test frontend TypeScript build after making changes to web components
+globs: web/src/**/*.tsx, web/src/**/*.ts
+alwaysApply: false
+---
+
+# Frontend Build Testing
+
+After making changes to frontend TypeScript/React files, verify the build compiles successfully.
+
+## Required Checks
+
+1. **Run TypeScript build check** before considering changes complete:
+   ```bash
+   cd web && npm run build
+   ```
+
+2. **Check for linter errors** using the ReadLints tool on modified files
+
+3. **Common TypeScript issues to verify**:
+   - Props match component interface definitions
+   - Generic types like `unknown` are not used directly as ReactNode
+   - All imports resolve correctly
+   - No unused variables or imports
+
+## Example Fixes
+
+### ReactNode Type Error
+```typescript
+// BAD - unknown can't be ReactNode
+{run.result && <div>{run.result}</div>}
+
+// GOOD - explicit null check or type assertion
+{run.result !== undefined && run.result !== null && (
+  <div>{JSON.stringify(run.result)}</div>
+)}
+```
+
+### Props Mismatch
+```typescript
+// BAD - using non-existent prop
+<ConfirmModal confirmVariant="danger" />
+
+// GOOD - check actual component props
+<ConfirmModal danger={true} isOpen={true} />
+```
+
+## When to Check
+
+- After creating new components
+- After modifying component props
+- After changing type definitions
+- Before marking frontend tasks as complete

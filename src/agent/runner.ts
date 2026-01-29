@@ -151,6 +151,9 @@ export class AgentRunner {
       let messages = context.messages;
       let iterations = 0;
       const maxIterations = 10; // Prevent infinite loops
+      
+      // Track all streaming content for thought process
+      let streamingHistory = '';
 
       while (iterations < maxIterations) {
         iterations++;
@@ -174,6 +177,7 @@ export class AgentRunner {
         })) {
           if (chunk.delta) {
             currentResponse += chunk.delta;
+            streamingHistory += chunk.delta; // Track for thought process
             this.broadcast('agent:token', { runId, delta: chunk.delta });
           }
 
@@ -290,6 +294,11 @@ export class AgentRunner {
           role: 'assistant',
           content: response,
           timestamp: Date.now(),
+          // Include thought process if streaming history differs from final response
+          // (indicates tool usage or multi-step reasoning)
+          thoughtProcess: streamingHistory && streamingHistory !== response
+            ? streamingHistory
+            : undefined,
         };
         session.messages.push(assistantMessage);
       }

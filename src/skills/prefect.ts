@@ -162,7 +162,7 @@ export const prefectRunFlowSkill: Skill = {
   parameters: {
     type: 'object',
     properties: {
-      flow_name: {
+      name: {
         type: 'string',
         description: 'Name of the workflow to run',
       },
@@ -171,11 +171,11 @@ export const prefectRunFlowSkill: Skill = {
         description: 'Optional JSON object of parameters to pass to the workflow. Example: {"data_url":"https://example.com/data.json"}',
       },
     },
-    required: ['flow_name'],
+    required: ['name'],
   },
   async execute(params, _context): Promise<SkillResult> {
-    const { flow_name, parameters: paramsJson } = params as {
-      flow_name: string;
+    const { name, parameters: paramsJson } = params as {
+      name: string;
       parameters?: string;
     };
 
@@ -202,7 +202,7 @@ export const prefectRunFlowSkill: Skill = {
     }
 
     try {
-      const response = await fetch(`${PREFECT_BRIDGE_URL}/flows/${encodeURIComponent(flow_name)}/run`, {
+      const response = await fetch(`${PREFECT_BRIDGE_URL}/flows/${encodeURIComponent(name)}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parameters: flowParams }),
@@ -226,7 +226,7 @@ export const prefectRunFlowSkill: Skill = {
           started_at: data.started_at,
           ended_at: data.ended_at,
           result: data.result,
-          message: `Workflow "${flow_name}" ${data.status}. Run ID: ${data.id}`,
+          message: `Workflow "${name}" ${data.status}. Run ID: ${data.id}`,
         },
       };
     } catch (error) {
@@ -360,15 +360,15 @@ export const prefectDeleteFlowSkill: Skill = {
   parameters: {
     type: 'object',
     properties: {
-      flow_name: {
+      name: {
         type: 'string',
         description: 'Name of the workflow to delete',
       },
     },
-    required: ['flow_name'],
+    required: ['name'],
   },
   async execute(params, _context): Promise<SkillResult> {
-    const { flow_name } = params as { flow_name: string };
+    const { name } = params as { name: string };
 
     // Check if Prefect is available
     const available = await checkPrefectAvailable();
@@ -380,7 +380,7 @@ export const prefectDeleteFlowSkill: Skill = {
     }
 
     try {
-      const response = await fetch(`${PREFECT_BRIDGE_URL}/flows/${encodeURIComponent(flow_name)}`, {
+      const response = await fetch(`${PREFECT_BRIDGE_URL}/flows/${encodeURIComponent(name)}`, {
         method: 'DELETE',
       });
 
@@ -397,8 +397,8 @@ export const prefectDeleteFlowSkill: Skill = {
         success: true,
         data: {
           deleted: true,
-          flow: flow_name,
-          message: `Workflow "${flow_name}" deleted successfully.`,
+          flow: name,
+          message: `Workflow "${name}" deleted successfully.`,
         },
       };
     } catch (error) {

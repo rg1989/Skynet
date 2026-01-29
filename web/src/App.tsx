@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Chat } from './components/Chat';
 import { TaskList } from './components/TaskList';
+import { WorkflowManager } from './components/WorkflowManager';
 import { CronManager } from './components/CronManager';
 import { Settings } from './components/Settings';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
 
-type Tab = 'chat' | 'tasks' | 'cron' | 'settings';
+type Tab = 'chat' | 'tasks' | 'workflows' | 'cron' | 'settings';
 
 // Icons
 function ChatIcon() {
@@ -21,6 +22,14 @@ function TasksIcon() {
   return (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  );
+}
+
+function WorkflowsIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
     </svg>
   );
 }
@@ -52,6 +61,7 @@ function App() {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'chat', label: 'Chat', icon: <ChatIcon /> },
     { id: 'tasks', label: 'Tasks', icon: <TasksIcon /> },
+    { id: 'workflows', label: 'Workflows', icon: <WorkflowsIcon /> },
     { id: 'cron', label: 'Schedule', icon: <ScheduleIcon /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon /> },
   ];
@@ -109,6 +119,16 @@ function App() {
             </header>
             <div className="flex-1 overflow-auto p-6">
               <TaskList />
+            </div>
+          </div>
+        )}
+        {activeTab === 'workflows' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <header className="h-14 shrink-0 border-b border-slate-700/50 flex items-center px-6 bg-[#1e2227]">
+              <h1 className="text-lg font-semibold">Workflows</h1>
+            </header>
+            <div className="flex-1 overflow-auto p-6">
+              <WorkflowManager />
             </div>
           </div>
         )}

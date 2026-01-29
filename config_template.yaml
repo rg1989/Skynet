@@ -1,0 +1,301 @@
+# Morning Briefing System Configuration Template
+# Copy this file to config.yaml and customize your settings
+
+# ==============================================================================
+# GENERAL SETTINGS
+# ==============================================================================
+general:
+  # Your name for personalized greetings
+  user_name: "Your Name"
+  
+  # Your timezone (e.g., "America/New_York", "Europe/London", "Asia/Tokyo")
+  timezone: "America/New_York"
+  
+  # Output directory for generated briefing documents
+  output_directory: "./briefings"
+  
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  log_level: "INFO"
+  
+  # Generate briefing document file (true/false)
+  generate_document: true
+  
+  # Auto-open briefing document after generation
+  auto_open_document: false
+
+# ==============================================================================
+# GOOGLE CALENDAR SETTINGS
+# ==============================================================================
+calendar:
+  # Enable calendar integration
+  enabled: true
+  
+  # Path to Google Calendar credentials JSON file
+  credentials_file: "credentials/calendar_credentials.json"
+  
+  # Path to store OAuth tokens
+  token_file: "tokens/calendar_token.json"
+  
+  # Calendar IDs to fetch events from (empty for primary calendar)
+  calendar_ids:
+    - "primary"
+    # - "work@company.com"
+    # - "personal@gmail.com"
+  
+  # Maximum number of events to display
+  max_events: 10
+  
+  # Include all-day events
+  include_all_day: true
+  
+  # Include declined events
+  include_declined: false
+  
+  # Time range for events (hours from now)
+  time_range_hours: 24
+
+# ==============================================================================
+# GMAIL SETTINGS
+# ==============================================================================
+email:
+  # Enable email integration
+  enabled: true
+  
+  # Path to Gmail credentials JSON file
+  credentials_file: "credentials/gmail_credentials.json"
+  
+  # Path to store OAuth tokens
+  token_file: "tokens/gmail_token.json"
+  
+  # Time range for unread emails (hours)
+  time_range_hours: 24
+  
+  # Maximum number of emails to process
+  max_emails: 50
+  
+  # Enable AI-powered email summarization
+  ai_summarization: true
+  
+  # Priority keywords for email classification
+  priority_keywords:
+    high:
+      - "urgent"
+      - "asap"
+      - "emergency"
+      - "deadline"
+      - "important"
+      - "critical"
+    medium:
+      - "meeting"
+      - "review"
+      - "follow up"
+      - "response needed"
+      - "action required"
+  
+  # Sender priority rules (email domains/addresses)
+  priority_senders:
+    high:
+      - "ceo@company.com"
+      - "urgent@alerts.com"
+    medium:
+      - "@company.com"
+      - "noreply@important-service.com"
+  
+  # Skip emails from these senders
+  skip_senders:
+    - "noreply@newsletter.com"
+    - "notifications@social-media.com"
+
+# ==============================================================================
+# WEATHER SETTINGS
+# ==============================================================================
+weather:
+  # Enable weather integration
+  enabled: true
+  
+  # Primary weather service ("openweathermap", "weatherapi")
+  primary_service: "openweathermap"
+  
+  # Fallback weather services (in order of preference)
+  fallback_services:
+    - "weatherapi"
+  
+  # Location settings
+  location:
+    # Auto-detect location using IP (true/false)
+    auto_detect: true
+    
+    # Manual location override (used if auto_detect is false)
+    city: "New York"
+    country_code: "US"
+    
+    # Coordinates (optional, overrides city if provided)
+    latitude: null
+    longitude: null
+  
+  # Unit system ("metric", "imperial")
+  units: "imperial"
+  
+  # Temperature unit preference ("celsius", "fahrenheit")
+  temperature_unit: "fahrenheit"
+  
+  # Include detailed forecast
+  include_forecast: true
+  
+  # Forecast hours to include
+  forecast_hours: 24
+  
+  # Include weather alerts
+  include_alerts: true
+
+# ==============================================================================
+# AI INTEGRATION SETTINGS
+# ==============================================================================
+ai:
+  # Primary AI service ("openai", "anthropic", "local", "none")
+  primary_service: "openai"
+  
+  # OpenAI settings
+  openai:
+    model: "gpt-3.5-turbo"
+    max_tokens: 1000
+    temperature: 0.3
+  
+  # Anthropic settings (if using Claude)
+  anthropic:
+    model: "claude-3-haiku-20240307"
+    max_tokens: 1000
+  
+  # Local AI settings (if using local models)
+  local:
+    model_path: "./models/local-model"
+    api_url: "http://localhost:11434"  # For Ollama
+  
+  # Email summarization prompts
+  email_prompts:
+    summary: "Summarize these emails concisely, highlighting key action items and deadlines."
+    priority: "Classify email priority based on content, sender, and urgency indicators."
+
+# ==============================================================================
+# OUTPUT FORMATTING
+# ==============================================================================
+formatting:
+  # Output format ("markdown", "html", "text", "json")
+  primary_format: "markdown"
+  
+  # Include emojis in output
+  include_emojis: true
+  
+  # Date format for briefing title
+  date_format: "%A, %B %d, %Y"
+  
+  # Time format for events
+  time_format: "%I:%M %p"
+  
+  # Briefing sections to include (in order)
+  sections:
+    - "header"
+    - "calendar"
+    - "email"
+    - "weather"
+    - "summary"
+    - "footer"
+  
+  # Custom section templates
+  templates:
+    header: "🌅 MORNING BRIEFING - {date}"
+    calendar_title: "📅 TODAY'S SCHEDULE"
+    email_title: "📧 EMAIL SUMMARY"
+    weather_title: "🌤️ WEATHER FORECAST"
+    summary_title: "📋 DAILY SUMMARY"
+    footer: "Have a productive day! 🚀"
+
+# ==============================================================================
+# NOTIFICATION SETTINGS
+# ==============================================================================
+notifications:
+  # Enable desktop notifications
+  desktop: false
+  
+  # Enable email notifications (send briefing to email)
+  email: false
+  
+  # Email settings (if enabled)
+  email_settings:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    sender_email: "your-email@gmail.com"
+    recipient_email: "your-email@gmail.com"
+    # App password for Gmail (not your regular password)
+    app_password: "your-app-password"
+  
+  # Enable Slack notifications
+  slack: false
+  
+  # Slack webhook URL (if enabled)
+  slack_webhook: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+
+# ==============================================================================
+# CACHING SETTINGS
+# ==============================================================================
+caching:
+  # Enable caching to reduce API calls
+  enabled: true
+  
+  # Cache directory
+  cache_directory: "./cache"
+  
+  # Cache expiration times (in minutes)
+  expiration:
+    weather: 30      # Weather data cached for 30 minutes
+    calendar: 10     # Calendar events cached for 10 minutes
+    email: 5         # Email data cached for 5 minutes
+  
+  # Clear cache on startup
+  clear_on_startup: false
+
+# ==============================================================================
+# ADVANCED SETTINGS
+# ==============================================================================
+advanced:
+  # Request timeout (seconds)
+  request_timeout: 30
+  
+  # Maximum retries for failed requests
+  max_retries: 3
+  
+  # Retry delay (seconds)
+  retry_delay: 2
+  
+  # Enable detailed logging
+  verbose_logging: false
+  
+  # Custom CSS for HTML output
+  custom_css: "./assets/briefing_style.css"
+  
+  # Backup settings
+  backup:
+    enabled: true
+    directory: "./backups"
+    keep_days: 30
+  
+  # Performance settings
+  performance:
+    parallel_requests: true
+    max_workers: 3
+    
+# ==============================================================================
+# DEVELOPMENT SETTINGS (for testing)
+# ==============================================================================
+development:
+  # Mock API responses for testing
+  mock_apis: false
+  
+  # Skip API calls and use sample data
+  use_sample_data: false
+  
+  # Debug output
+  debug_output: false
+  
+  # Save raw API responses
+  save_raw_responses: false

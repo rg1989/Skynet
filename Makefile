@@ -17,7 +17,7 @@ NC := \033[0m # No Color
 all: start
 
 # Main start command - stops existing, builds, and starts fresh
-start: stop build run
+start: stop prefect-setup build run
 
 # Just run without building (faster restart)
 run:
@@ -25,7 +25,7 @@ run:
 	@npm start
 
 # Development mode with hot reload
-dev: stop
+dev: stop prefect-setup
 	@echo "$(GREEN)Starting Skynet in development mode...$(NC)"
 	@npm run dev
 

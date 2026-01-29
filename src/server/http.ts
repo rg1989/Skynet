@@ -45,6 +45,39 @@ export function createAppServer(config: Config): ServerInstance {
   const routes = createRoutes(config, wsHandler);
   app.use('/api', routes);
 
+  // Proxy for Prefect Bridge (forwards /prefect/* to localhost:4201/*)
+  const PREFECT_BRIDGE_URL = process.env.PREFECT_BRIDGE_URL || 'http://localhost:4201';
+  app.use('/prefect', async (req, res) => {
+    const targetUrl = `${PREFECT_BRIDGE_URL}${req.url}`;
+    
+    try {
+      const response = await fetch(targetUrl, {
+        method: req.method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(req.headers.authorization ? { 'Authorization': req.headers.authorization } : {}),
+        },
+        body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? JSON.stringify(req.body) : undefined,
+      });
+
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
+        res.status(response.status).json(data);
+      } else {
+        const text = await response.text();
+        res.status(response.status).send(text);
+      }
+    } catch (error) {
+      // Prefect Bridge is not available
+      res.status(503).json({
+        error: 'Prefect Bridge unavailable',
+        detail: 'The Prefect Bridge server is not running',
+      });
+    }
+  });
+
   // Serve static files for web UI (when built)
   const webDistPath = join(__dirname, '../../web/dist');
   app.use(express.static(webDistPath));

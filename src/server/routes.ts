@@ -162,6 +162,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       res.json({
         status: result.status,
         response: result.response,
+        runId: result.runId,  // Include runId for frontend coordination with WebSocket events
         error: result.error,
         toolsUsed: result.toolsUsed,
         durationMs: result.durationMs,

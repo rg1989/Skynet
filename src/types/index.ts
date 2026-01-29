@@ -79,6 +79,8 @@ export interface SessionMessage {
     path?: string;
     base64?: string;
   }[];
+  /** Thought process / streaming content captured during response generation */
+  thoughtProcess?: string;
 }
 
 export interface Session {

@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import type { Message } from '../store';
 import { formatThoughtProcess } from '../utils/formatThoughtProcess';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface ChatMessageProps {
   message: Message;
@@ -156,18 +157,28 @@ function TextWithLinks({ text, className }: { text: string; className?: string }
   );
 }
 
+// Brain/thinking icon for thought process
+function ThinkingIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+    </svg>
+  );
+}
+
 // Thought process box - displays the steps the AI took
+// Styled distinctly from the main response to show it's internal reasoning
 function ThoughtProcessBox({ content }: { content: string }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true); // Collapsed by default
   const steps = formatThoughtProcess(content);
   
   if (steps.length === 0) return null;
   
   return (
-    <div className="mb-3">
+    <div className="mb-4 pb-3 border-b border-slate-600/30">
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors mb-2"
+        className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-400 transition-colors"
       >
         <svg 
           className={`w-3 h-3 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} 
@@ -177,18 +188,23 @@ function ThoughtProcessBox({ content }: { content: string }) {
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
+        <ThinkingIcon />
         <span className="font-medium">Thought Process</span>
-        <span className="text-slate-500">({steps.length} step{steps.length !== 1 ? 's' : ''})</span>
+        <span className="text-slate-600">({steps.length} step{steps.length !== 1 ? 's' : ''})</span>
       </button>
       
       {!isCollapsed && (
-        <div className="bg-slate-800/50 rounded-lg border border-slate-600/30 p-3 text-xs">
+        <div className="mt-2 bg-slate-900/60 rounded-lg border border-slate-700/40 p-3 text-xs italic">
+          <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-2 font-medium flex items-center gap-1.5">
+            <ThinkingIcon />
+            Internal Reasoning
+          </div>
           {steps.map((step, index) => (
             <div 
               key={index} 
-              className="text-slate-400 leading-relaxed py-1.5 border-b border-slate-700/50 last:border-b-0"
+              className="text-slate-500 leading-relaxed py-1.5 border-b border-slate-700/20 last:border-b-0 pl-4 border-l-2 border-slate-600/50"
             >
-              <span className="text-emerald-500/70 mr-2 font-medium">{index + 1}.</span>
+              <span className="text-slate-600 mr-2 font-medium not-italic">{index + 1}.</span>
               {step}
             </div>
           ))}
@@ -254,8 +270,12 @@ export const ChatMessage = memo(function ChatMessage({ message }: ChatMessagePro
                 <span>Using tool: {getToolName(message.content) || 'unknown'}()</span>
               </div>
             </div>
-          ) : (
+          ) : isUser ? (
+            // User messages - simple text with links
             <TextWithLinks text={displayContent} className="text-sm leading-relaxed whitespace-pre-wrap" />
+          ) : (
+            // Assistant and system messages - full markdown rendering
+            <MarkdownRenderer content={displayContent} />
           )}
           
           {/* Active tool calls */}

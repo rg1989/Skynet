@@ -15,6 +15,15 @@ let hasInitialized = false;
 let currentRunId: string | null = null;
 let accumulatedContent = '';
 
+/**
+ * Clears the current run state. Call this when the user clicks Stop
+ * to prevent incoming WebSocket events from updating the UI.
+ */
+export function clearCurrentRun() {
+  currentRunId = null;
+  accumulatedContent = '';
+}
+
 // Handle HMR - close old WebSocket when module is hot-replaced
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {

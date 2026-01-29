@@ -10,6 +10,8 @@ interface ConnectedClient {
   id: string;
   ws: WebSocket;
   connectedAt: number;
+  pingInterval?: NodeJS.Timeout;
+  isAlive: boolean;
 }
 
 export class WSHandler {
@@ -30,6 +32,7 @@ export class WSHandler {
         id: clientId,
         ws,
         connectedAt: Date.now(),
+        isAlive: true,
       };
       
       this.clients.set(clientId, client);
@@ -42,17 +45,45 @@ export class WSHandler {
         message: 'Connected to Skynet',
       });
 
+      // Handle pong responses to keep connection alive
+      ws.on('pong', () => {
+        client.isAlive = true;
+      });
+
+      // Set up ping interval to keep connection alive and detect dead connections
+      // Ping every 30 seconds
+      client.pingInterval = setInterval(() => {
+        if (!client.isAlive) {
+          // Connection is dead, terminate it
+          console.log(`WebSocket client ${clientId} not responding to pings, terminating`);
+          clearInterval(client.pingInterval);
+          ws.terminate();
+          return;
+        }
+        
+        client.isAlive = false;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        }
+      }, 30000);
+
       ws.on('message', (data) => {
         this.handleMessage(clientId, data.toString());
       });
 
       ws.on('close', () => {
+        if (client.pingInterval) {
+          clearInterval(client.pingInterval);
+        }
         this.clients.delete(clientId);
         console.log(`WebSocket client disconnected: ${clientId} (total: ${this.clients.size})`);
       });
 
       ws.on('error', (error) => {
         console.error(`WebSocket error for ${clientId}:`, error);
+        if (client.pingInterval) {
+          clearInterval(client.pingInterval);
+        }
         this.clients.delete(clientId);
       });
     });
@@ -141,6 +172,9 @@ export class WSHandler {
    */
   close(): void {
     for (const client of this.clients.values()) {
+      if (client.pingInterval) {
+        clearInterval(client.pingInterval);
+      }
       client.ws.close(1001, 'Server shutting down');
     }
     this.clients.clear();
