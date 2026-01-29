@@ -31,3 +31,6 @@ prefect/tests/
 .env
 .env.local
 .env.*.local
+
+# Chat sessions (per-machine data)
+data/sessions/
