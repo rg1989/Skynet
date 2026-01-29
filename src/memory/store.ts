@@ -1,15 +1,63 @@
 import Database from 'better-sqlite3';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { createHash } from 'crypto';
 import type { Fact, Memory, MemorySearchResult } from '../types/index.js';
 
 /**
  * Memory Store - SQLite-based storage for facts and semantic memories
+ * Includes embedding cache to prevent redundant embedding generation
  */
+
+// Simple in-memory LRU cache for embeddings
+class EmbeddingCache {
+  private cache: Map<string, number[]> = new Map();
+  private maxSize: number;
+
+  constructor(maxSize = 1000) {
+    this.maxSize = maxSize;
+  }
+
+  private hash(text: string): string {
+    return createHash('sha256').update(text).digest('hex').slice(0, 16);
+  }
+
+  get(text: string): number[] | undefined {
+    const key = this.hash(text);
+    const value = this.cache.get(key);
+    if (value) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  set(text: string, embedding: number[]): void {
+    const key = this.hash(text);
+    
+    // Evict oldest entries if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+    
+    this.cache.set(key, embedding);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
 
 export class MemoryStore {
   private db: Database.Database;
   private embedFn?: (text: string) => Promise<number[]>;
+  private embeddingCache: EmbeddingCache;
 
   constructor(dataDir: string) {
     // Ensure data directory exists
@@ -19,8 +67,33 @@ export class MemoryStore {
 
     const dbPath = join(dataDir, 'memory.db');
     this.db = new Database(dbPath);
+    this.embeddingCache = new EmbeddingCache(1000); // Cache up to 1000 embeddings
     
     this.initSchema();
+  }
+
+  /**
+   * Get embedding with caching
+   * Returns cached embedding if available, otherwise generates and caches
+   */
+  private async getEmbedding(text: string): Promise<number[] | null> {
+    if (!this.embedFn) return null;
+
+    // Check cache first
+    const cached = this.embeddingCache.get(text);
+    if (cached) {
+      return cached;
+    }
+
+    // Generate new embedding
+    try {
+      const embedding = await this.embedFn(text);
+      this.embeddingCache.set(text, embedding);
+      return embedding;
+    } catch (error) {
+      console.warn('Failed to generate embedding:', error);
+      return null;
+    }
   }
 
   /**
@@ -135,21 +208,17 @@ export class MemoryStore {
   // ============== Semantic Memory API ==============
 
   /**
-   * Store a memory with embedding
+   * Store a memory with embedding (uses cache for efficiency)
    */
   async remember(content: string, metadata?: Record<string, unknown>): Promise<string> {
     const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = Date.now();
     
-    // Generate embedding if function is available
+    // Generate embedding with caching
     let embedding: Buffer | null = null;
-    if (this.embedFn) {
-      try {
-        const vector = await this.embedFn(content);
-        embedding = Buffer.from(new Float32Array(vector).buffer);
-      } catch (error) {
-        console.warn('Failed to generate embedding:', error);
-      }
+    const vector = await this.getEmbedding(content);
+    if (vector) {
+      embedding = Buffer.from(new Float32Array(vector).buffer);
     }
     
     const stmt = this.db.prepare(`
@@ -163,7 +232,7 @@ export class MemoryStore {
   }
 
   /**
-   * Search memories by semantic similarity
+   * Search memories by semantic similarity (uses cached embeddings)
    */
   async search(query: string, limit = 5): Promise<MemorySearchResult[]> {
     // If no embedding function, fall back to text search
@@ -172,8 +241,11 @@ export class MemoryStore {
     }
     
     try {
-      // Generate query embedding
-      const queryVector = await this.embedFn(query);
+      // Generate query embedding with caching
+      const queryVector = await this.getEmbedding(query);
+      if (!queryVector) {
+        return this.textSearch(query, limit);
+      }
       
       // Get all memories with embeddings
       const stmt = this.db.prepare('SELECT * FROM memories WHERE embedding IS NOT NULL');
@@ -282,12 +354,24 @@ export class MemoryStore {
   /**
    * Get memory statistics
    */
-  getStats(): { factCount: number; memoryCount: number; memoriesWithEmbeddings: number } {
+  getStats(): { factCount: number; memoryCount: number; memoriesWithEmbeddings: number; embeddingCacheSize: number } {
     const factCount = (this.db.prepare('SELECT COUNT(*) as count FROM facts').get() as { count: number }).count;
     const memoryCount = (this.db.prepare('SELECT COUNT(*) as count FROM memories').get() as { count: number }).count;
     const memoriesWithEmbeddings = (this.db.prepare('SELECT COUNT(*) as count FROM memories WHERE embedding IS NOT NULL').get() as { count: number }).count;
     
-    return { factCount, memoryCount, memoriesWithEmbeddings };
+    return { 
+      factCount, 
+      memoryCount, 
+      memoriesWithEmbeddings,
+      embeddingCacheSize: this.embeddingCache.size,
+    };
+  }
+
+  /**
+   * Clear the embedding cache (useful for testing or memory pressure)
+   */
+  clearEmbeddingCache(): void {
+    this.embeddingCache.clear();
   }
 
   /**

@@ -13,6 +13,9 @@ export class OllamaProvider implements LLMProvider {
   private visionModel: string;
   private embeddingModel: string;
   private config: Config;
+  private chatTimeout: number;
+  private embedTimeout: number;
+  private keepAlive: string;
 
   constructor(config: Config) {
     const ollamaConfig = config.providers.ollama;
@@ -25,6 +28,23 @@ export class OllamaProvider implements LLMProvider {
     this.visionModel = ollamaConfig.visionModel || 'llava';
     this.embeddingModel = config.providers.embeddings?.model || 'nomic-embed-text';
     this.config = config;
+    
+    // Timeout and keep-alive configuration
+    this.chatTimeout = ollamaConfig.chatTimeout ?? 120000; // 2 minutes default
+    this.embedTimeout = ollamaConfig.embedTimeout ?? 30000; // 30 seconds default
+    this.keepAlive = ollamaConfig.keepAlive ?? '10m'; // 10 minutes default
+  }
+
+  /**
+   * Wrap a promise with a timeout
+   */
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => 
+        setTimeout(() => reject(new Error(`Ollama ${operation} timed out after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
   }
 
   async chat(params: ChatParams): Promise<ChatResponse> {
@@ -38,18 +58,23 @@ export class OllamaProvider implements LLMProvider {
       },
     }));
 
-    const response = await this.client.chat({
-      model: this.model,
-      messages: params.messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-      tools,
-      options: {
-        temperature: params.temperature ?? 0.7,
-        num_predict: params.maxTokens,
-      },
-    });
+    const response = await this.withTimeout(
+      this.client.chat({
+        model: this.model,
+        messages: params.messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        })),
+        tools,
+        keep_alive: this.keepAlive,
+        options: {
+          temperature: params.temperature ?? 0.7,
+          num_predict: params.maxTokens,
+        },
+      }),
+      this.chatTimeout,
+      'chat'
+    );
 
     // Parse tool calls if present
     const toolCalls = response.message.tool_calls?.map(tc => ({
@@ -89,6 +114,7 @@ export class OllamaProvider implements LLMProvider {
       })),
       tools,
       stream: true,
+      keep_alive: this.keepAlive,
       options: {
         temperature: params.temperature ?? 0.7,
         num_predict: params.maxTokens,
@@ -120,16 +146,21 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async analyzeImage(imageBase64: string, prompt: string, _mimeType = 'image/png'): Promise<string> {
-    const response = await this.client.chat({
-      model: this.visionModel,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-          images: [imageBase64],
-        },
-      ],
-    });
+    const response = await this.withTimeout(
+      this.client.chat({
+        model: this.visionModel,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+            images: [imageBase64],
+          },
+        ],
+        keep_alive: this.keepAlive,
+      }),
+      this.chatTimeout,
+      'analyzeImage'
+    );
 
     return response.message.content || '';
   }
@@ -160,10 +191,15 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    const response = await this.client.embeddings({
-      model: this.embeddingModel,
-      prompt: text,
-    });
+    const response = await this.withTimeout(
+      this.client.embeddings({
+        model: this.embeddingModel,
+        prompt: text,
+        keep_alive: this.keepAlive,
+      }),
+      this.embedTimeout,
+      'embed'
+    );
 
     return response.embedding;
   }
@@ -174,6 +210,55 @@ export class OllamaProvider implements LLMProvider {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Warmup the model by sending a minimal request
+   * This loads the model into memory so subsequent requests are faster
+   */
+  async warmup(): Promise<void> {
+    console.log(`Warming up Ollama model: ${this.model} (keep_alive: ${this.keepAlive})`);
+    const startTime = Date.now();
+    
+    try {
+      await this.withTimeout(
+        this.client.chat({
+          model: this.model,
+          messages: [{ role: 'user', content: 'hi' }],
+          keep_alive: this.keepAlive,
+          options: {
+            num_predict: 1, // Generate just 1 token
+          },
+        }),
+        this.chatTimeout,
+        'warmup'
+      );
+      
+      const duration = Date.now() - startTime;
+      console.log(`Model ${this.model} warmed up in ${duration}ms`);
+    } catch (error) {
+      console.error('Warmup failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ping the model to keep it loaded in memory
+   * Call this periodically to prevent model unloading
+   */
+  async ping(): Promise<void> {
+    try {
+      await this.client.chat({
+        model: this.model,
+        messages: [{ role: 'user', content: '' }],
+        keep_alive: this.keepAlive,
+        options: {
+          num_predict: 0, // Don't generate anything
+        },
+      });
+    } catch {
+      // Ignore ping failures
     }
   }
 }

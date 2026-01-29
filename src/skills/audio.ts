@@ -261,13 +261,13 @@ export const transcribeSkill: Skill = {
 
 export const speakSkill: Skill = {
   name: 'speak',
-  description: 'Speak text aloud using text-to-speech.',
+  description: 'Speak text aloud using text-to-speech. IMPORTANT: Only use this when the user EXPLICITLY asks you to speak, read aloud, or use voice. Do NOT use this for regular responses - only for on-demand voice requests like "read this aloud" or "say this out loud".',
   parameters: {
     type: 'object',
     properties: {
       text: {
         type: 'string',
-        description: 'The text to speak',
+        description: 'The specific text to speak aloud (only what the user asked to be spoken)',
       },
       voice: {
         type: 'string',

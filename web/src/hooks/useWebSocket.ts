@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect } from 'react';
 import { useStore } from '../store';
 
 interface WSEvent {
@@ -7,123 +7,191 @@ interface WSEvent {
   timestamp: number;
 }
 
+// Singleton WebSocket connection - prevents duplicates from StrictMode or HMR
+let globalWs: WebSocket | null = null;
+let globalWsConnecting = false;
+let reconnectTimeout: number | null = null;
+let hasInitialized = false;
+let currentRunId: string | null = null;
+let accumulatedContent = '';
+
+// Handle HMR - close old WebSocket when module is hot-replaced
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    console.log('HMR: Disposing old WebSocket connection');
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (globalWs) {
+      globalWs.close();
+      globalWs = null;
+    }
+    hasInitialized = false;
+    globalWsConnecting = false;
+    currentRunId = null;
+    accumulatedContent = '';
+  });
+}
+
 export function useWebSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<number | null>(null);
-  
   const {
     setConnected,
     setActiveRunId,
+    setIsThinking,
     setThinkingContent,
-    appendThinkingContent,
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
   } = useStore();
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+  useEffect(() => {
+    // Only initialize once per app lifetime (module-level flag survives StrictMode remounts)
+    if (hasInitialized) {
       return;
     }
+    hasInitialized = true;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:3000`;
-    
-    console.log('Connecting to WebSocket:', wsUrl);
-    const ws = new WebSocket(wsUrl);
+    const handleEvent = (event: WSEvent) => {
+      const { type, payload } = event;
+      const p = payload as Record<string, unknown>;
 
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      setConnected(true);
-    };
+      switch (type) {
+        case 'agent:start':
+          currentRunId = p.runId as string;
+          accumulatedContent = '';
+          setActiveRunId(currentRunId);
+          setIsThinking(true); // Start thinking state
+          setThinkingContent('');
+          clearActiveTools();
+          break;
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnected(false);
-      
-      // Reconnect after 3 seconds
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        connect();
-      }, 3000);
-    };
+        case 'agent:thinking':
+          // Only process if we have an active run
+          if (currentRunId && p.runId === currentRunId) {
+            setIsThinking(false); // No longer just thinking, now streaming
+            accumulatedContent += p.content as string;
+            setThinkingContent(accumulatedContent);
+          }
+          break;
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
+        case 'agent:token':
+          // Only process if we have an active run
+          if (currentRunId && p.runId === currentRunId) {
+            setIsThinking(false); // No longer just thinking, now streaming
+            accumulatedContent += p.delta as string;
+            setThinkingContent(accumulatedContent);
+          }
+          break;
 
-    ws.onmessage = (event) => {
-      try {
-        const data: WSEvent = JSON.parse(event.data);
-        handleEvent(data);
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        case 'agent:tool_start':
+          if (currentRunId && p.runId === currentRunId) {
+            setIsThinking(false); // Tool started, not just thinking
+            addActiveTool(p.name as string, p.params);
+          }
+          break;
+
+        case 'agent:tool_end':
+          if (currentRunId && p.runId === currentRunId) {
+            removeActiveTool(p.name as string);
+          }
+          break;
+
+        case 'agent:end':
+          if (currentRunId && p.runId === currentRunId) {
+            currentRunId = null;
+            accumulatedContent = '';
+            setActiveRunId(null);
+            setIsThinking(false);
+            clearActiveTools();
+          }
+          break;
+
+        default:
+          // Ignore unhandled events
+          break;
       }
     };
 
-    wsRef.current = ws;
-  }, [setConnected]);
+    const connect = () => {
+      // Prevent duplicate connections
+      if (globalWs?.readyState === WebSocket.OPEN || globalWsConnecting) {
+        return;
+      }
 
-  const handleEvent = useCallback((event: WSEvent) => {
-    const { type, payload } = event;
-    const p = payload as Record<string, unknown>;
+      globalWsConnecting = true;
 
-    switch (type) {
-      case 'agent:start':
-        setActiveRunId(p.runId as string);
-        setThinkingContent('');
-        clearActiveTools();
-        break;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // Use /ws path - works in both dev (Vite proxy) and production
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      
+      console.log('Connecting to WebSocket:', wsUrl);
+      const ws = new WebSocket(wsUrl);
 
-      case 'agent:thinking':
-        appendThinkingContent(p.content as string);
-        break;
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        globalWs = ws;
+        globalWsConnecting = false;
+        setConnected(true);
+      };
 
-      case 'agent:token':
-        appendThinkingContent(p.delta as string);
-        break;
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        globalWs = null;
+        globalWsConnecting = false;
+        setConnected(false);
+        
+        // Reconnect after 3 seconds
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+        }
+        reconnectTimeout = window.setTimeout(() => {
+          reconnectTimeout = null;
+          connect();
+        }, 3000);
+      };
 
-      case 'agent:tool_start':
-        addActiveTool(p.name as string, p.params);
-        break;
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        globalWsConnecting = false;
+      };
 
-      case 'agent:tool_end':
-        removeActiveTool(p.name as string);
-        break;
+      ws.onmessage = (event) => {
+        try {
+          const data: WSEvent = JSON.parse(event.data);
+          handleEvent(data);
+        } catch (error) {
+          console.error('Failed to parse WebSocket message:', error);
+        }
+      };
+    };
 
-      case 'agent:end':
-        setActiveRunId(null);
-        clearActiveTools();
-        break;
+    connect();
 
-      default:
-        console.log('Unhandled event:', type, payload);
-    }
+    // Cleanup on unmount (though this shouldn't happen for App-level hook)
+    return () => {
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
+      // Don't close the WebSocket on cleanup - it's a singleton
+      // This prevents StrictMode from breaking the connection
+    };
   }, [
+    setConnected,
     setActiveRunId,
+    setIsThinking,
     setThinkingContent,
-    appendThinkingContent,
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
   ]);
 
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
+  const sendMessage = (type: string, payload: unknown) => {
+    if (globalWs?.readyState === WebSocket.OPEN) {
+      globalWs.send(JSON.stringify({ type, payload }));
     }
-    wsRef.current?.close();
-  }, []);
-
-  const sendMessage = useCallback((type: string, payload: unknown) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, payload }));
-    }
-  }, []);
-
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
+  };
 
   return { sendMessage };
 }

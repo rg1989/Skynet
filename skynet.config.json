@@ -8,12 +8,16 @@
     "allowedUsers": []
   },
   "providers": {
-    "default": "ollama",
+    "default": "anthropic",
     "ollama": {
       "baseUrl": "http://localhost:11434",
       "model": "qwen2.5:7b-instruct-q4_K_M",
       "visionModel": "llava",
-      "toolsEnabled": false
+      "toolsEnabled": true,
+      "toolsMode": "hybrid",
+      "chatTimeout": 120000,
+      "embedTimeout": 30000,
+      "keepAlive": "10m"
     },
     "openai": {
       "apiKey": "${OPENAI_API_KEY}",

@@ -1,5 +1,30 @@
 import { create } from 'zustand';
 
+// LocalStorage keys
+const STORAGE_KEY_SESSION = 'skynet_current_session';
+
+// Get initial session key from localStorage or generate new one
+function getInitialSessionKey(): string {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_SESSION);
+    if (stored) {
+      return stored;
+    }
+  } catch {
+    // localStorage not available
+  }
+  return ''; // Will be set after fetching sessions
+}
+
+// Save session key to localStorage
+function saveSessionKey(key: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_SESSION, key);
+  } catch {
+    // localStorage not available
+  }
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -7,6 +32,13 @@ export interface Message {
   timestamp: number;
   thinking?: boolean;
   toolCalls?: { name: string; status: 'running' | 'done'; result?: string }[];
+}
+
+export interface SessionInfo {
+  key: string;
+  messageCount: number;
+  lastActivity: number;
+  createdAt: number;
 }
 
 export interface ScheduledTask {
@@ -19,13 +51,56 @@ export interface ScheduledTask {
   nextRun?: number;
 }
 
+export interface ProviderInfo {
+  name: string;
+  model: string;
+  isDefault: boolean;
+  isAvailable: boolean;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
+export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
+
+export interface Settings {
+  // Provider/Model
+  currentProvider: string;
+  currentModel: string;
+  providers: ProviderInfo[];
+  availableModels: { name: string; description?: string; size?: number }[];
+  
+  // Tools
+  tools: ToolInfo[];
+  toolsMode: ToolsMode;
+  
+  // System prompt
+  systemPrompt: string;
+  isDefaultPrompt: boolean;
+  
+  // Loading states
+  loading: boolean;
+  warmingUp: boolean;
+}
+
 interface AppState {
   // Connection
   connected: boolean;
   setConnected: (connected: boolean) => void;
 
+  // Sessions
+  sessions: SessionInfo[];
+  currentSessionKey: string;
+  setSessions: (sessions: SessionInfo[]) => void;
+  setCurrentSession: (key: string) => void;
+  removeSession: (key: string) => void;
+
   // Messages
   messages: Message[];
+  setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
   updateMessage: (id: string, updates: Partial<Message>) => void;
   clearMessages: () => void;
@@ -33,9 +108,17 @@ interface AppState {
   // Active task
   activeRunId: string | null;
   setActiveRunId: (runId: string | null) => void;
+  isThinking: boolean; // True when waiting for first token
+  setIsThinking: (thinking: boolean) => void;
   thinkingContent: string;
   setThinkingContent: (content: string) => void;
   appendThinkingContent: (delta: string) => void;
+
+  // Voice input
+  isListening: boolean; // True when speech recognition is active
+  setIsListening: (listening: boolean) => void;
+  isTranscribing: boolean; // True when processing speech to text
+  setIsTranscribing: (transcribing: boolean) => void;
 
   // Tool execution
   activeTools: { name: string; params?: unknown }[];
@@ -51,6 +134,10 @@ interface AppState {
   removeTask: (id: string) => void;
 
   // Settings
+  settings: Settings;
+  setSettings: (updates: Partial<Settings>) => void;
+  
+  // Legacy provider (for backwards compatibility)
   provider: string;
   setProvider: (provider: string) => void;
 }
@@ -60,8 +147,22 @@ export const useStore = create<AppState>((set) => ({
   connected: false,
   setConnected: (connected) => set({ connected }),
 
+  // Sessions
+  sessions: [],
+  currentSessionKey: getInitialSessionKey(),
+  setSessions: (sessions) => set({ sessions }),
+  setCurrentSession: (key) => {
+    saveSessionKey(key);
+    set({ currentSessionKey: key, messages: [] });
+  },
+  removeSession: (key) =>
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.key !== key),
+    })),
+
   // Messages
   messages: [],
+  setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
   updateMessage: (id, updates) =>
@@ -75,10 +176,18 @@ export const useStore = create<AppState>((set) => ({
   // Active task
   activeRunId: null,
   setActiveRunId: (runId) => set({ activeRunId: runId }),
+  isThinking: false,
+  setIsThinking: (thinking) => set({ isThinking: thinking }),
   thinkingContent: '',
   setThinkingContent: (content) => set({ thinkingContent: content }),
   appendThinkingContent: (delta) =>
     set((state) => ({ thinkingContent: state.thinkingContent + delta })),
+
+  // Voice input
+  isListening: false,
+  setIsListening: (listening) => set({ isListening: listening }),
+  isTranscribing: false,
+  setIsTranscribing: (transcribing) => set({ isTranscribing: transcribing }),
 
   // Tool execution
   activeTools: [],
@@ -101,7 +210,25 @@ export const useStore = create<AppState>((set) => ({
   removeTask: (id) =>
     set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
 
-  // Settings
-  provider: 'ollama',
+  // Settings - default to empty, will be populated from API
+  settings: {
+    currentProvider: '',
+    currentModel: '',
+    providers: [],
+    availableModels: [],
+    tools: [],
+    toolsMode: 'hybrid',
+    systemPrompt: '',
+    isDefaultPrompt: true,
+    loading: true, // Start as loading until API responds
+    warmingUp: false,
+  },
+  setSettings: (updates) =>
+    set((state) => ({
+      settings: { ...state.settings, ...updates },
+    })),
+
+  // Legacy provider (for backwards compatibility) - empty by default
+  provider: '',
   setProvider: (provider) => set({ provider }),
 }));

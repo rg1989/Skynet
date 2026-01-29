@@ -37,6 +37,7 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: params.maxTokens || 4096,
       system: systemMessage,
       messages: otherMessages.map(m => {
+        // Handle tool results (sent as user messages with tool_result content)
         if (m.role === 'tool') {
           return {
             role: 'user' as const,
@@ -47,6 +48,28 @@ export class AnthropicProvider implements LLMProvider {
             }],
           };
         }
+        // Handle assistant messages with tool calls
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          const content: Array<Anthropic.TextBlock | Anthropic.ToolUseBlock> = [];
+          // Add text content if present
+          if (m.content) {
+            content.push({ type: 'text' as const, text: m.content, citations: null });
+          }
+          // Add tool_use blocks
+          for (const tc of m.toolCalls) {
+            content.push({
+              type: 'tool_use' as const,
+              id: tc.id,
+              name: tc.name,
+              input: tc.arguments,
+            });
+          }
+          return {
+            role: 'assistant' as const,
+            content,
+          };
+        }
+        // Regular text messages
         return {
           role: m.role as 'user' | 'assistant',
           content: m.content,
@@ -96,6 +119,7 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: params.maxTokens || 4096,
       system: systemMessage,
       messages: otherMessages.map(m => {
+        // Handle tool results (sent as user messages with tool_result content)
         if (m.role === 'tool') {
           return {
             role: 'user' as const,
@@ -106,6 +130,28 @@ export class AnthropicProvider implements LLMProvider {
             }],
           };
         }
+        // Handle assistant messages with tool calls
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          const content: Array<Anthropic.TextBlock | Anthropic.ToolUseBlock> = [];
+          // Add text content if present
+          if (m.content) {
+            content.push({ type: 'text' as const, text: m.content, citations: null });
+          }
+          // Add tool_use blocks
+          for (const tc of m.toolCalls) {
+            content.push({
+              type: 'tool_use' as const,
+              id: tc.id,
+              name: tc.name,
+              input: tc.arguments,
+            });
+          }
+          return {
+            role: 'assistant' as const,
+            content,
+          };
+        }
+        // Regular text messages
         return {
           role: m.role as 'user' | 'assistant',
           content: m.content,

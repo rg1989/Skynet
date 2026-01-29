@@ -6,6 +6,7 @@ import { memorySkills } from './memory.js';
 import { visionSkills } from './vision.js';
 import { audioSkills } from './audio.js';
 import { gmailSkills } from './gmail.js';
+import { selfConfigSkills } from './self-config.js';
 
 /**
  * Skill Registry - manages all available skills
@@ -83,6 +84,7 @@ export function createCoreSkillRegistry(): SkillRegistry {
   registry.registerAll(visionSkills);
   registry.registerAll(audioSkills);
   registry.registerAll(gmailSkills);
+  registry.registerAll(selfConfigSkills);
   
   return registry;
 }
@@ -95,3 +97,4 @@ export { memorySkills } from './memory.js';
 export { visionSkills } from './vision.js';
 export { audioSkills } from './audio.js';
 export { gmailSkills } from './gmail.js';
+export { selfConfigSkills } from './self-config.js';

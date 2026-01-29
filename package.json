@@ -5,8 +5,12 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "dev": "concurrently -k -n backend,frontend -c blue,green \"PORT=3001 tsx watch src/index.ts\" \"npm run dev --prefix web\"",
+    "dev:backend": "PORT=3001 tsx watch src/index.ts",
+    "dev:frontend": "npm run dev --prefix web",
+    "build": "npm run build --prefix web && tsc",
+    "build:backend": "tsc",
+    "build:frontend": "npm run build --prefix web",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
@@ -17,8 +21,9 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.7.0",
     "cheerio": "^1.0.0",
-    "express": "^4.21.2",
+    "dotenv": "^17.2.3",
     "execa": "^9.5.2",
+    "express": "^4.21.2",
     "googleapis": "^146.0.0",
     "grammy": "^1.35.0",
     "node-cron": "^3.0.3",
@@ -33,6 +38,7 @@
     "@types/node": "^22.10.5",
     "@types/node-cron": "^3.0.11",
     "@types/ws": "^8.5.13",
+    "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

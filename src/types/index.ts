@@ -8,6 +8,7 @@ export interface Message {
   content: string;
   toolCallId?: string;
   name?: string;
+  toolCalls?: ToolCall[]; // For assistant messages that include tool calls
 }
 
 export interface ToolCall {

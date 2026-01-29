@@ -1,4 +1,4 @@
-export { SkillRegistry, createCoreSkillRegistry, fileSkills, execSkills, webSkills, memorySkills, visionSkills, audioSkills, gmailSkills } from './registry.js';
+export { SkillRegistry, createCoreSkillRegistry, fileSkills, execSkills, webSkills, memorySkills, visionSkills, audioSkills, gmailSkills, selfConfigSkills } from './registry.js';
 export { readFileSkill, writeFileSkill, editFileSkill, listDirectorySkill } from './file-ops.js';
 export { execSkill } from './exec.js';
 export { webFetchSkill, webSearchSkill } from './web-browse.js';
@@ -33,3 +33,18 @@ export {
   gmailMarkReadSkill,
   initializeGmail,
 } from './gmail.js';
+export {
+  // selfConfigSkills is exported from registry.js
+  initializeSelfConfigSkills,
+  updateKnownSkillNames,
+  getConfigSkill,
+  listToolsSkill,
+  enableToolSkill,
+  disableToolSkill,
+  setToolsModeSkill,
+  switchProviderSkill,
+  switchModelSkill,
+  listModelsSkill,
+  getSystemPromptSkill,
+  setSystemPromptSkill,
+} from './self-config.js';

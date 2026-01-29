@@ -14,17 +14,26 @@ const telegramSchema = z.object({
   allowedUsers: z.array(z.number()).optional(),
 });
 
+// Tools mode for each provider
+// - hybrid: Try native API first, fall back to text parsing (best compatibility)
+// - native: Only use native API tool calls (for models with confirmed support)
+// - text: Only use text-based <tool_call> approach (works with any model)
+// - disabled: No tools, simple chat mode
+const toolsModeSchema = z.enum(['hybrid', 'native', 'text', 'disabled']).default('hybrid');
+
 const openaiProviderSchema = z.object({
   apiKey: z.string(),
   model: z.string().default('gpt-4o'),
   visionModel: z.string().default('gpt-4o'),
   toolsEnabled: z.boolean().default(true),
+  toolsMode: toolsModeSchema,
 });
 
 const anthropicProviderSchema = z.object({
   apiKey: z.string(),
   model: z.string().default('claude-sonnet-4-20250514'),
   toolsEnabled: z.boolean().default(true),
+  toolsMode: toolsModeSchema,
 });
 
 const ollamaProviderSchema = z.object({
@@ -32,6 +41,12 @@ const ollamaProviderSchema = z.object({
   model: z.string(),
   visionModel: z.string().optional(),
   toolsEnabled: z.boolean().default(true),
+  toolsMode: toolsModeSchema,
+  // Timeout configuration in milliseconds
+  chatTimeout: z.number().default(120000), // 2 minutes for chat (model loading + generation)
+  embedTimeout: z.number().default(30000), // 30 seconds for embeddings
+  // Keep-alive duration (how long Ollama keeps model loaded after request)
+  keepAlive: z.string().default('10m'), // Keep model loaded for 10 minutes
 });
 
 const embeddingsSchema = z.object({

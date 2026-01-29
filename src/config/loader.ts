@@ -134,6 +134,14 @@ export function loadConfig(configPath?: string): Config {
   // Substitute environment variables in config
   const substituted = substituteEnvVars(rawConfig) as Record<string, unknown>;
 
+  // Override port from PORT env var (allows dev server on different port)
+  if (process.env.PORT) {
+    if (!substituted.server) {
+      substituted.server = {};
+    }
+    (substituted.server as Record<string, unknown>).port = parseInt(process.env.PORT, 10);
+  }
+
   // Validate and parse
   const result = configSchema.safeParse(substituted);
   
@@ -156,6 +164,11 @@ export function getDefaultConfig(): Partial<Config> {
       ollama: {
         baseUrl: 'http://localhost:11434',
         model: 'llama3.2',
+        toolsEnabled: true,
+        toolsMode: 'hybrid' as const,
+        chatTimeout: 120000,
+        embedTimeout: 30000,
+        keepAlive: '10m',
       },
     },
     agent: {

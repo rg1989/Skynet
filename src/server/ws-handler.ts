@@ -18,7 +18,8 @@ export class WSHandler {
   private clientIdCounter = 0;
 
   constructor(server: Server) {
-    this.wss = new WebSocketServer({ server });
+    // Use path /ws for WebSocket connections (works with Vite proxy in dev)
+    this.wss = new WebSocketServer({ server, path: '/ws' });
     this.setupHandlers();
   }
 

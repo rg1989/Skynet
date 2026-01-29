@@ -60,6 +60,12 @@ export interface LLMProvider {
    * Check if provider is available/configured
    */
   isAvailable(): Promise<boolean>;
+  
+  /**
+   * Warmup the model (optional)
+   * Sends a minimal request to load model into memory for faster subsequent requests
+   */
+  warmup?(): Promise<void>;
 }
 
 /**

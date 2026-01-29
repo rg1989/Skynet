@@ -3,6 +3,7 @@ import type { LLMProvider } from './types.js';
 import { OpenAIProvider } from './openai.js';
 import { AnthropicProvider } from './anthropic.js';
 import { OllamaProvider } from './ollama.js';
+import { getRuntimeConfig } from '../config/runtime.js';
 
 export * from './types.js';
 export { OpenAIProvider } from './openai.js';
@@ -14,12 +15,24 @@ export { OllamaProvider } from './ollama.js';
  */
 export class ProviderManager {
   private providers: Map<string, LLMProvider> = new Map();
-  private config: Config;
+  private baseConfig: Config;
   private defaultProvider: string;
 
   constructor(config: Config) {
-    this.config = config;
+    this.baseConfig = config;
     this.defaultProvider = config.providers.default;
+  }
+
+  /**
+   * Get the effective config (with runtime overrides applied)
+   */
+  private getEffectiveConfig(): Config {
+    try {
+      return getRuntimeConfig().getConfig();
+    } catch {
+      // Runtime config not initialized yet, use base config
+      return this.baseConfig;
+    }
   }
 
   /**
@@ -48,24 +61,30 @@ export class ProviderManager {
    * Create a provider instance
    */
   private createProvider(name: string): LLMProvider {
+    const config = this.getEffectiveConfig();
+    
     switch (name) {
-      case 'openai':
-        if (!this.config.providers.openai?.apiKey) {
+      case 'openai': {
+        const apiKey = config.providers.openai?.apiKey;
+        if (!apiKey || apiKey.startsWith('${')) {
           throw new Error('OpenAI API key not configured');
         }
-        return new OpenAIProvider(this.config);
+        return new OpenAIProvider(config);
+      }
 
-      case 'anthropic':
-        if (!this.config.providers.anthropic?.apiKey) {
+      case 'anthropic': {
+        const apiKey = config.providers.anthropic?.apiKey;
+        if (!apiKey || apiKey.startsWith('${')) {
           throw new Error('Anthropic API key not configured');
         }
-        return new AnthropicProvider(this.config);
+        return new AnthropicProvider(config);
+      }
 
       case 'ollama':
-        if (!this.config.providers.ollama) {
+        if (!config.providers.ollama) {
           throw new Error('Ollama not configured');
         }
-        return new OllamaProvider(this.config);
+        return new OllamaProvider(config);
 
       default:
         throw new Error(`Unknown provider: ${name}`);
@@ -76,19 +95,32 @@ export class ProviderManager {
    * Get list of available providers
    */
   getAvailable(): string[] {
+    const config = this.getEffectiveConfig();
     const available: string[] = [];
     
-    if (this.config.providers.openai?.apiKey) {
+    // Check if API key is real (not a placeholder like ${OPENAI_API_KEY})
+    const openaiKey = config.providers.openai?.apiKey;
+    if (openaiKey && !openaiKey.startsWith('${')) {
       available.push('openai');
     }
-    if (this.config.providers.anthropic?.apiKey) {
+    
+    const anthropicKey = config.providers.anthropic?.apiKey;
+    if (anthropicKey && !anthropicKey.startsWith('${')) {
       available.push('anthropic');
     }
-    if (this.config.providers.ollama) {
+    
+    if (config.providers.ollama) {
       available.push('ollama');
     }
     
     return available;
+  }
+
+  /**
+   * Clear cached providers (call when API keys change)
+   */
+  clearCache(): void {
+    this.providers.clear();
   }
 
   /**
@@ -107,17 +139,20 @@ export class ProviderManager {
    * Get the best provider for embeddings
    */
   getEmbeddingProvider(): LLMProvider {
-    const embeddingsConfig = this.config.providers.embeddings;
+    const config = this.getEffectiveConfig();
+    const embeddingsConfig = config.providers.embeddings;
     
     if (embeddingsConfig?.provider) {
       return this.get(embeddingsConfig.provider);
     }
     
     // Prefer Ollama for local embeddings, then OpenAI
-    if (this.config.providers.ollama) {
+    if (config.providers.ollama) {
       return this.get('ollama');
     }
-    if (this.config.providers.openai?.apiKey) {
+    
+    const openaiKey = config.providers.openai?.apiKey;
+    if (openaiKey && !openaiKey.startsWith('${')) {
       return this.get('openai');
     }
     

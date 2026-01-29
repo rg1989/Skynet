@@ -1,9 +1,11 @@
+import 'dotenv/config';
 import { loadConfig } from './config/loader.js';
+import { initializeRuntimeConfig, initializeDefaultToolStates } from './config/runtime.js';
 import { createAppServer } from './server/http.js';
-import { setScheduler, setAgentRunner } from './server/routes.js';
+import { setScheduler, setAgentRunner, setProviderManager } from './server/routes.js';
 import { createProviderManager } from './providers/index.js';
 import { AgentRunner } from './agent/index.js';
-import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills } from './skills/index.js';
+import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills, initializeSelfConfigSkills } from './skills/index.js';
 import { TelegramBot } from './telegram/index.js';
 import { MemoryStore } from './memory/index.js';
 import { Scheduler } from './scheduler/index.js';
@@ -23,6 +25,8 @@ async function main(): Promise<void> {
   let config;
   try {
     config = loadConfig();
+    // Initialize runtime config manager
+    initializeRuntimeConfig(config);
   } catch (error) {
     console.error('Failed to load configuration:', error);
     process.exit(1);
@@ -89,10 +93,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Create agent runner
+  // Create agent runner (pass providerManager so it can dynamically switch providers)
   const agentRunner = new AgentRunner(
     config,
-    defaultProvider!,
+    providerManager,
     (type, payload) => server.wsHandler.broadcast(type, payload)
   );
 
@@ -121,8 +125,17 @@ async function main(): Promise<void> {
   agentRunner.registerSkills(skillRegistry.getAll());
   console.log(`Skills registered: ${skillRegistry.count}`);
 
-  // Set agent runner on routes for API
+  // Initialize self-config skills with provider manager and skill names
+  initializeSelfConfigSkills(providerManager, skillRegistry.getNames());
+  console.log('Self-configuration skills initialized');
+
+  // Initialize default tool states - all tools disabled except self-config
+  initializeDefaultToolStates(skillRegistry.getNames());
+  console.log('Default tool states: only self-config tools enabled');
+
+  // Set agent runner and provider manager on routes for API
   setAgentRunner(agentRunner);
+  setProviderManager(providerManager);
 
   // Initialize scheduler
   const scheduler = new Scheduler(
@@ -171,11 +184,25 @@ async function main(): Promise<void> {
   // Start the server
   await server.start();
 
+  // Warmup the model (non-blocking)
+  if (defaultProvider && 'warmup' in defaultProvider && typeof defaultProvider.warmup === 'function') {
+    console.log('Warming up model...');
+    defaultProvider.warmup().then(() => {
+      console.log('Model warmup complete');
+    }).catch((err: Error) => {
+      console.warn('Model warmup failed:', err.message);
+    });
+  }
+
   // Log status
+  const isDev = process.env.NODE_ENV !== 'production';
   console.log('');
   console.log('=== Skynet Lite Ready ===');
   console.log(`  API: http://${config.server.host}:${config.server.port}`);
   console.log(`  WebSocket: ws://${config.server.host}:${config.server.port}`);
+  if (isDev) {
+    console.log(`  Dev UI: http://localhost:5173 (hot reload)`);
+  }
   console.log(`  Provider: ${config.providers.default}`);
   console.log(`  Telegram: ${telegramBot?.running ? 'connected' : 'not connected'}`);
   console.log(`  Skills: ${skillRegistry.count} loaded`);

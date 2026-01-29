@@ -75,7 +75,7 @@ export function createAppServer(config: Config): ServerInstance {
     return new Promise((resolve) => {
       httpServer.listen(config.server.port, config.server.host, () => {
         console.log(`Server running at http://${config.server.host}:${config.server.port}`);
-        console.log(`WebSocket available at ws://${config.server.host}:${config.server.port}`);
+        console.log(`WebSocket available at ws://${config.server.host}:${config.server.port}/ws`);
         resolve();
       });
     });
