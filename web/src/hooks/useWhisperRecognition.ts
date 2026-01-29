@@ -3,14 +3,22 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 // Dynamic import for transformers.js to enable code splitting
 let pipeline: typeof import('@huggingface/transformers').pipeline | null = null;
 
+// Silence detection configuration
+const SILENCE_THRESHOLD = 0.06; // Audio level below this is considered silence (higher = less sensitive to breathing)
+const SILENCE_TIMEOUT_MS = 2000; // Auto-send after 2 seconds of silence
+const AUDIO_CHECK_INTERVAL_MS = 50; // Check audio level every 50ms
+
 interface WhisperRecognitionReturn {
   isListening: boolean;
   isLoading: boolean;
+  isTranscribing: boolean; // Whether Whisper is actively processing audio
   loadingProgress: number;
   transcript: string;
   interimTranscript: string;
   isSupported: boolean;
   error: string | null;
+  silenceProgress: number; // 0-1, where 1 = full silence timeout reached
+  hasSpeechStarted: boolean; // Whether user has started speaking at all
   startListening: () => void;
   stopListening: () => void;
   cancelListening: () => void;
@@ -24,17 +32,27 @@ interface WhisperRecognitionReturn {
 export function useWhisperRecognition(): WhisperRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSupported, setIsSupported] = useState(true);
+  const [silenceProgress, setSilenceProgress] = useState(0); // 0-1
+  const [hasSpeechStarted, setHasSpeechStarted] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const transciberRef = useRef<unknown>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const wasCancelledRef = useRef(false);
+  
+  // Audio analysis refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const silenceStartRef = useRef<number | null>(null);
+  const audioCheckIntervalRef = useRef<number | null>(null);
+  const stopListeningRef = useRef<(() => void) | null>(null);
   
   // Check browser support
   useEffect(() => {
@@ -96,17 +114,20 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
     if (wasCancelledRef.current) {
       console.log('[Whisper] Skipping processing - was cancelled');
       setInterimTranscript('');
+      setIsTranscribing(false);
       return;
     }
     
     if (audioBlob.size < 1000) {
       console.log('[Whisper] No audio captured (blob size:', audioBlob.size, ')');
       setInterimTranscript('');
+      setIsTranscribing(false);
       // Don't show error - just silently return since no audio was captured
       return;
     }
     
     try {
+      setIsTranscribing(true);
       setInterimTranscript('Processing...');
       
       const transcriber = await loadModel();
@@ -143,16 +164,26 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
         console.log('[Whisper] Transcription result:', result);
         
         const text = result.text?.trim() || '';
-        if (text) {
+        // Filter out Whisper's blank audio tokens - these should not be sent as messages
+        const invalidResponses = ['[BLANK_AUDIO]', '(blank audio)', '[ Silence ]', '[silence]'];
+        const isBlankAudio = !text || invalidResponses.some(invalid => 
+          text.toLowerCase().includes(invalid.toLowerCase())
+        );
+        
+        if (!isBlankAudio) {
           setTranscript(text);
+        } else {
+          console.log('[Whisper] Detected blank/silent audio, not setting transcript');
         }
         setInterimTranscript('');
+        setIsTranscribing(false);
         
         await audioContext.close();
       } catch (decodeErr) {
         // Audio decode error - likely empty or corrupted audio, not a real error
         console.log('[Whisper] Could not decode audio:', decodeErr);
         setInterimTranscript('');
+        setIsTranscribing(false);
         if (audioContext) {
           await audioContext.close();
         }
@@ -161,8 +192,24 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
       console.error('[Whisper] Processing error:', err);
       setError('Failed to process audio');
       setInterimTranscript('');
+      setIsTranscribing(false);
     }
   }, [loadModel]);
+
+  // Clean up audio monitoring
+  const cleanupAudioMonitoring = useCallback(() => {
+    if (audioCheckIntervalRef.current) {
+      clearInterval(audioCheckIntervalRef.current);
+      audioCheckIntervalRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    silenceStartRef.current = null;
+    setSilenceProgress(0);
+  }, []);
 
   const startListening = useCallback(async () => {
     if (isListening) return;
@@ -170,8 +217,11 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
     setError(null);
     setTranscript('');
     setInterimTranscript('');
+    setSilenceProgress(0);
+    setHasSpeechStarted(false);
     audioChunksRef.current = [];
     wasCancelledRef.current = false;
+    silenceStartRef.current = null;
     
     try {
       // Pre-load model if not loaded
@@ -187,6 +237,16 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
         } 
       });
       streamRef.current = stream;
+      
+      // Set up audio analysis for silence detection
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
       
       // Create media recorder
       const mediaRecorder = new MediaRecorder(stream, {
@@ -209,20 +269,58 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
       
       mediaRecorder.start(100); // Collect data every 100ms
       setIsListening(true);
-      setInterimTranscript('Listening...');
-      console.log('[Whisper] Recording started');
+      console.log('[Whisper] Recording started with silence detection');
+      
+      // Start monitoring audio levels for silence detection
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      
+      audioCheckIntervalRef.current = window.setInterval(() => {
+        if (!analyserRef.current) return;
+        
+        analyserRef.current.getByteFrequencyData(dataArray);
+        
+        // Calculate average audio level (0-1)
+        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length / 255;
+        
+        const now = Date.now();
+        
+        if (average > SILENCE_THRESHOLD) {
+          // Sound detected - reset silence timer
+          silenceStartRef.current = null;
+          setSilenceProgress(0);
+          setHasSpeechStarted(true);
+        } else {
+          // Silence detected
+          if (silenceStartRef.current === null) {
+            silenceStartRef.current = now;
+          }
+          
+          const silenceDuration = now - silenceStartRef.current;
+          const progress = Math.min(silenceDuration / SILENCE_TIMEOUT_MS, 1);
+          setSilenceProgress(progress);
+          
+          // Auto-stop after silence timeout (only if user has spoken at least once)
+          if (silenceDuration >= SILENCE_TIMEOUT_MS && stopListeningRef.current) {
+            console.log('[Whisper] Silence timeout - auto-stopping');
+            stopListeningRef.current();
+          }
+        }
+      }, AUDIO_CHECK_INTERVAL_MS);
       
     } catch (err) {
       console.error('[Whisper] Failed to start recording:', err);
       setError('Microphone access denied');
     }
-  }, [isListening, loadModel, processAudio]);
+  }, [isListening, loadModel, processAudio, cleanupAudioMonitoring]);
 
   const stopListening = useCallback(() => {
     if (!mediaRecorderRef.current) return;
     
     console.log('[Whisper] Stopping recording...');
     setIsListening(false);
+    
+    // Clean up audio monitoring
+    cleanupAudioMonitoring();
     
     if (mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -233,7 +331,12 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-  }, []);
+  }, [cleanupAudioMonitoring]);
+
+  // Keep ref updated so interval can call stopListening
+  useEffect(() => {
+    stopListeningRef.current = stopListening;
+  }, [stopListening]);
 
   const cancelListening = useCallback(() => {
     console.log('[Whisper] Cancelling...');
@@ -244,8 +347,13 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
     setIsListening(false);
     setTranscript('');
     setInterimTranscript('');
+    setSilenceProgress(0);
+    setHasSpeechStarted(false);
     setError(null);
     audioChunksRef.current = [];
+    
+    // Clean up audio monitoring
+    cleanupAudioMonitoring();
     
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -256,16 +364,19 @@ export function useWhisperRecognition(): WhisperRecognitionReturn {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-  }, []);
+  }, [cleanupAudioMonitoring]);
 
   return {
     isListening,
     isLoading,
+    isTranscribing,
     loadingProgress,
     transcript,
     interimTranscript,
     isSupported,
     error,
+    silenceProgress,
+    hasSpeechStarted,
     startListening,
     stopListening,
     cancelListening,

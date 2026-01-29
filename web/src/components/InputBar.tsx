@@ -15,7 +15,7 @@ export function InputBar({
   onVoiceInput,
   disabled = false, 
   voiceSupported = false,
-  placeholder = 'Type a message...',
+  placeholder = 'Type a message... (Enter to send, Shift+Enter for new line)',
   messageHistory = [],
 }: InputBarProps) {
   const [text, setText] = useState('');

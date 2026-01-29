@@ -249,11 +249,14 @@ export function Chat() {
   const {
     isListening: speechIsListening,
     isLoading: whisperLoading,
+    isTranscribing: whisperIsTranscribing,
     loadingProgress: whisperProgress,
     transcript,
     interimTranscript,
     isSupported: voiceSupported,
     error: speechError,
+    silenceProgress,
+    hasSpeechStarted,
     startListening,
     stopListening,
     cancelListening,
@@ -524,15 +527,24 @@ export function Chat() {
     stopListening();
     setIsListening(false);
     
-    const finalText = (transcript + interimTranscript).trim();
+    // Only use transcript, not interimTranscript (which may contain status text like "Processing...")
+    const finalText = transcript.trim();
     if (finalText) {
       setIsTranscribing(true);
       setTimeout(() => {
         setIsTranscribing(false);
         handleSendMessage(finalText);
       }, 500);
+    } else {
+      // No valid audio was recorded - show informational message to user only (not sent to model)
+      addMessage({
+        id: `msg_${Date.now()}`,
+        role: 'system',
+        content: 'No audio was recorded. Please try again.',
+        timestamp: Date.now(),
+      });
     }
-  }, [stopListening, setIsListening, transcript, interimTranscript, setIsTranscribing, handleSendMessage]);
+  }, [stopListening, setIsListening, transcript, setIsTranscribing, handleSendMessage, addMessage]);
 
   const isProcessing = activeRunId !== null || isThinking || thinkingContent.length > 0 || isTranscribing;
 
@@ -589,8 +601,8 @@ export function Chat() {
                 <ChatMessage key={msg.id} message={msg} />
               ))}
               
-              {/* Transcribing indicator - shown while processing voice input */}
-              {isTranscribing && <TranscribingIndicator />}
+              {/* Transcribing indicator - shown while Whisper is processing voice input */}
+              {(isTranscribing || whisperIsTranscribing) && <TranscribingIndicator />}
               
               {/* Thinking indicator - shown while waiting for first token or during tool execution */}
               {(isThinking || activeTools.length > 0) && !thinkingContent && <ThinkingIndicator />}
@@ -647,6 +659,8 @@ export function Chat() {
           onDone={handleDoneVoice}
           isLoadingModel={whisperLoading}
           loadingProgress={whisperProgress}
+          silenceProgress={silenceProgress}
+          hasSpeechStarted={hasSpeechStarted}
         />
       )}
     </div>

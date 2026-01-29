@@ -1,5 +1,5 @@
 /**
- * TranscribingIndicator - Shows user avatar with animated dots while transcribing speech
+ * TranscribingIndicator - Shows user avatar with "Transcribing" label while processing speech
  * Similar to ThinkingIndicator but uses user styling (violet/purple) and right-aligned
  */
 export function TranscribingIndicator() {
@@ -12,21 +12,24 @@ export function TranscribingIndicator() {
         </svg>
       </div>
       
-      {/* Transcribing bubble with animated dots */}
+      {/* Transcribing bubble with label and animated dots */}
       <div className="bg-slate-800/90 rounded-2xl rounded-tr-md px-4 py-3 border border-violet-500/30 shadow-lg shadow-violet-500/10">
-        <div className="flex items-center gap-1.5">
-          <span 
-            className="w-2 h-2 bg-violet-400 rounded-full animate-transcribing-dot"
-            style={{ animationDelay: '0ms' }}
-          />
-          <span 
-            className="w-2 h-2 bg-violet-400 rounded-full animate-transcribing-dot"
-            style={{ animationDelay: '150ms' }}
-          />
-          <span 
-            className="w-2 h-2 bg-violet-400 rounded-full animate-transcribing-dot"
-            style={{ animationDelay: '300ms' }}
-          />
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-violet-300 font-medium">Transcribing</span>
+          <div className="flex items-center gap-1">
+            <span 
+              className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-transcribing-dot"
+              style={{ animationDelay: '0ms' }}
+            />
+            <span 
+              className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-transcribing-dot"
+              style={{ animationDelay: '150ms' }}
+            />
+            <span 
+              className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-transcribing-dot"
+              style={{ animationDelay: '300ms' }}
+            />
+          </div>
         </div>
       </div>
     </div>

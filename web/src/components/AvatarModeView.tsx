@@ -358,7 +358,7 @@ export function AvatarModeView({
             onVoiceInput={onVoiceInput}
             disabled={!isConnected || isProcessing}
             voiceSupported={voiceSupported}
-            placeholder="Type a message..."
+            placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
             messageHistory={userMessageHistory}
           />
         </div>

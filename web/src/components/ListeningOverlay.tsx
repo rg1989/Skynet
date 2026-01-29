@@ -5,11 +5,14 @@ interface ListeningOverlayProps {
   onDone: () => void;
   isLoadingModel?: boolean;
   loadingProgress?: number;
+  silenceProgress?: number; // 0-1, where 1 = silence timeout reached
+  hasSpeechStarted?: boolean; // Whether user has started speaking
 }
 
 /**
  * ListeningOverlay - Full-screen overlay shown while voice input is active
  * Also handles model loading state for local Whisper recognition
+ * Shows a silence timer ring that depletes when user stops speaking
  */
 export function ListeningOverlay({ 
   interimTranscript, 
@@ -18,19 +21,67 @@ export function ListeningOverlay({
   onDone,
   isLoadingModel = false,
   loadingProgress = 0,
+  silenceProgress = 0,
+  hasSpeechStarted = false,
 }: ListeningOverlayProps) {
   const displayText = finalTranscript + interimTranscript;
-  const hasContent = displayText.length > 0;
+  
+  // Calculate the ring's stroke offset for the depleting effect
+  // Ring starts full and depletes as silence progresses
+  const ringRadius = 52; // Radius of the timer ring
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  // When silenceProgress is 0, ring is full; when 1, ring is empty
+  const strokeDashoffset = silenceProgress * ringCircumference;
+  
+  // Only show the timer ring after speech has started
+  const showTimerRing = hasSpeechStarted && !isLoadingModel;
   
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
-      {/* Pulsing microphone icon */}
+      {/* Pulsing microphone icon with timer ring */}
       <div className="relative mb-6">
-        {/* Outer pulse rings */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="absolute w-32 h-32 rounded-full bg-violet-500/20 animate-ping" style={{ animationDuration: '2s' }} />
-          <span className="absolute w-24 h-24 rounded-full bg-violet-500/30 animate-ping" style={{ animationDuration: '1.5s', animationDelay: '0.3s' }} />
-        </div>
+        {/* Outer pulse rings - only show when actively speaking (not in silence) */}
+        {(!hasSpeechStarted || silenceProgress === 0) && !isLoadingModel && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="absolute w-32 h-32 rounded-full bg-violet-500/20 animate-ping" style={{ animationDuration: '2s' }} />
+            <span className="absolute w-24 h-24 rounded-full bg-violet-500/30 animate-ping" style={{ animationDuration: '1.5s', animationDelay: '0.3s' }} />
+          </div>
+        )}
+        
+        {/* Silence timer ring - circular progress that depletes during silence */}
+        {showTimerRing && (
+          <svg 
+            className="absolute w-[112px] h-[112px]"
+            style={{ 
+              transform: 'rotate(-90deg)',
+              left: '-16px',
+              top: '-16px',
+            }}
+          >
+            {/* Background ring (faint) */}
+            <circle
+              cx="56"
+              cy="56"
+              r={ringRadius}
+              fill="none"
+              stroke="rgba(16, 185, 129, 0.2)"
+              strokeWidth="4"
+            />
+            {/* Progress ring (depletes during silence) - emerald green, turns amber when low */}
+            <circle
+              cx="56"
+              cy="56"
+              r={ringRadius}
+              fill="none"
+              stroke={silenceProgress > 0.7 ? '#f59e0b' : '#10b981'}
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeDasharray={ringCircumference}
+              strokeDashoffset={strokeDashoffset}
+              className="transition-all duration-100"
+            />
+          </svg>
+        )}
         
         {/* Main mic button */}
         <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/40">
@@ -100,7 +151,9 @@ export function ListeningOverlay({
           Cancel
         </button>
         
-        {hasContent && (
+        {/* Always show Done button - users should be able to stop recording at any time */}
+        {/* If no audio was captured, Chat.tsx will show appropriate message */}
+        {!isLoadingModel && (
           <button
             onClick={onDone}
             className="px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-medium transition-colors flex items-center gap-2 cursor-pointer"
