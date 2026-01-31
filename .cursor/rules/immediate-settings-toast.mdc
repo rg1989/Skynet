@@ -1,0 +1,60 @@
+---
+description: Show toast notifications for immediate-effect settings changes
+globs: web/src/components/**/*.tsx
+alwaysApply: false
+---
+
+# Immediate Settings Toast Pattern
+
+When a setting change takes effect immediately (no Save/Apply button), show a toast message indicating success or failure.
+
+## When to Apply
+
+Use this pattern when:
+- A toggle, dropdown, or control changes a setting instantly
+- There is no "Save" or "Apply" button to confirm the change
+- The user needs feedback that their action was registered
+
+## Implementation
+
+Use the `useToast` hook from the existing Toast component:
+
+```tsx
+import { useToast } from './Toast';
+
+// In component:
+const { showToast } = useToast();
+
+// ❌ BAD - Silent immediate change
+<input
+  type="checkbox"
+  checked={ttsEnabled}
+  onChange={(e) => setTtsEnabled(e.target.checked)}
+/>
+
+// ✅ GOOD - Toast confirms the change
+<input
+  type="checkbox"
+  checked={ttsEnabled}
+  onChange={(e) => {
+    setTtsEnabled(e.target.checked);
+    showToast('success', e.target.checked ? 'AI voice enabled' : 'AI voice disabled');
+  }}
+/>
+```
+
+## Toast Message Guidelines
+
+1. **Be specific**: State what changed, not just "Settings saved"
+2. **Indicate state**: For toggles, mention the new state (enabled/disabled)
+3. **Handle errors**: If the operation can fail, catch and show error toast
+4. **Keep it brief**: 3-6 words is ideal
+
+## Examples
+
+| Control Type | Success Message |
+|--------------|-----------------|
+| Toggle on    | "AI voice enabled" |
+| Toggle off   | "AI voice disabled" |
+| Dropdown     | "Voice changed to [name]" |
+| Slider       | "Volume set to 80%" |

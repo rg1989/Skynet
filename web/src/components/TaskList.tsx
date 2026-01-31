@@ -32,8 +32,8 @@ export function TaskList() {
             <div className="text-xs text-gray-400">Tools running:</div>
             {activeTools.map((tool, i) => (
               <div key={i} className="flex items-center gap-2 text-sm">
-                <span className="animate-spin text-blue-400">⚙️</span>
-                <span className="text-blue-300">{tool.name}</span>
+                <span className="animate-spin text-emerald-400">⚙️</span>
+                <span className="text-emerald-300">{tool.name}</span>
               </div>
             ))}
           </div>

@@ -49,6 +49,8 @@ export function AvatarModeView({
     setContentUrl,
     ttsEnabled,
     setTtsEnabled,
+    selectedVoiceName,
+    setSelectedVoiceName,
     isThinking,
     thinkingContent,
     isTranscribing,
@@ -57,6 +59,16 @@ export function AvatarModeView({
 
   // TTS hook for speaking assistant messages
   const { speak, stop: stopSpeaking, isSpeaking, isSupported: ttsSupported, voices, selectedVoice, setVoice } = useTTS();
+
+  // Sync TTS voice with stored voice name
+  useEffect(() => {
+    if (voices.length > 0 && selectedVoiceName) {
+      const matchingVoice = voices.find(v => v.name === selectedVoiceName);
+      if (matchingVoice && matchingVoice.name !== selectedVoice?.name) {
+        setVoice(matchingVoice);
+      }
+    }
+  }, [voices, selectedVoiceName, selectedVoice, setVoice]);
 
   // Extract user message history for up/down arrow navigation in input
   const userMessageHistory = useMemo(() => 
@@ -195,6 +207,8 @@ export function AvatarModeView({
                 onChange={(e) => {
                   const voice = voices.find(v => v.name === e.target.value);
                   setVoice(voice || null);
+                  // Also persist to store
+                  setSelectedVoiceName(voice?.name || null);
                 }}
                 className="bg-slate-700/50 border border-slate-600/50 text-slate-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500/50 max-w-[150px]"
                 title="Voice"

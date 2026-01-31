@@ -1,0 +1,65 @@
+---
+description: Unified color system using only green (emerald) and purple (violet)
+globs: web/src/**/*.tsx
+alwaysApply: false
+---
+
+# Color System
+
+This app uses a strict two-color palette plus neutral grays. Do NOT introduce blue, sky, cyan, or other accent colors.
+
+## Primary Colors
+
+| Purpose | Color | Tailwind Classes |
+|---------|-------|------------------|
+| **Green (Emerald)** | Interactive elements, success states | `emerald-400`, `emerald-500`, `emerald-600` |
+| **Purple (Violet)** | Navigation, links, info states | `violet-400`, `violet-500`, `violet-600` |
+| **Red** | Errors only | `red-400`, `red-500`, `red-600` |
+| **Amber** | Warnings only | `amber-400`, `amber-500` |
+
+## Usage Guidelines
+
+### Navigation & Tabs
+- Active tab background: `bg-violet-600`
+- All tabs use the same purple color when active
+
+### Interactive Elements
+- Toggles when ON: `peer-checked:bg-emerald-600`
+- Primary buttons: `bg-emerald-600 hover:bg-emerald-700`
+- Focus borders: `focus:border-emerald-500`
+- Active badges: `bg-emerald-600`
+
+### Section Icons
+- Use `text-violet-400` for section header icons
+- Use `text-emerald-400` for status/activity indicators
+
+### Links
+- Text links: `text-violet-400 hover:text-violet-300`
+
+### Toast Notifications
+- Success: `emerald-500` (green border/progress)
+- Error: `red-500` (red border/progress)
+- Info: `violet-500` (purple border/progress)
+
+## Forbidden Colors
+
+Do NOT use these colors anywhere in the app:
+- `sky-*` (blue)
+- `blue-*`
+- `cyan-*`
+- `indigo-*` (use violet instead)
+- `teal-*` (use emerald instead)
+
+## Examples
+
+```tsx
+// ❌ BAD - Using blue
+className="text-blue-400 hover:text-blue-300"
+className="bg-sky-600"
+className="focus:border-sky-500"
+
+// ✅ GOOD - Using system colors
+className="text-violet-400 hover:text-violet-300"  // for links
+className="bg-violet-600"  // for navigation
+className="focus:border-emerald-500"  // for interactive elements
+```

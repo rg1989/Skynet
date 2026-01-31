@@ -1,0 +1,47 @@
+---
+description: Check for existing components before creating new ones
+globs: web/src/components/**/*.tsx
+alwaysApply: false
+---
+
+# Reuse Existing Components
+
+Before creating a new component, always check if a similar one already exists in the codebase.
+
+## Required Steps
+
+1. **Search first**: Before creating a component, search `web/src/components/` for similar functionality
+2. **Check the store**: Look in `web/src/store/index.ts` for related state that may indicate existing features
+3. **Extend, don't duplicate**: If a similar component exists, extend or modify it rather than creating a duplicate
+
+## Common Existing Components
+
+| Need | Check For |
+|------|-----------|
+| Notifications/alerts | `Toast.tsx`, `useToast` hook |
+| Confirmations | `ConfirmModal.tsx` |
+| Code display | `CodeBlock.tsx`, `StreamingCodeBlock.tsx` |
+| Loading states | `ThinkingIndicator.tsx`, `TranscribingIndicator.tsx` |
+| Overlays | `ListeningOverlay.tsx`, `ContentDisplay.tsx` |
+| Markdown | `MarkdownRenderer.tsx` |
+| Copy button | `CopyButton.tsx` |
+
+## Example
+
+```tsx
+// ❌ BAD - Creating a new toast/notification system
+const [message, setMessage] = useState<string | null>(null);
+{message && <div className="toast">{message}</div>}
+
+// ✅ GOOD - Use existing Toast system
+import { useToast } from './Toast';
+const { showToast } = useToast();
+showToast('success', 'Settings saved');
+```
+
+## When to Create New Components
+
+Only create new components when:
+- No similar component exists after thorough search
+- The functionality is fundamentally different from existing components
+- Extending an existing component would significantly increase its complexity

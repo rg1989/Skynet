@@ -79,6 +79,15 @@ export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
 
 export type AvatarDesign = '3d';
 
+// Toast notification
+export interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  text: string;
+  duration: number; // ms
+  createdAt: number;
+}
+
 // LocalStorage key for avatar mode settings
 const STORAGE_KEY_AVATAR = 'skynet_avatar_mode';
 
@@ -107,22 +116,30 @@ function getInitialAvatarSettings(): {
   enabled: boolean;
   design: AvatarDesign;
   ttsEnabled: boolean;
+  selectedVoiceName: string | null;
 } {
   try {
     const stored = localStorage.getItem(STORAGE_KEY_AVATAR);
     if (stored) {
       const parsed = JSON.parse(stored);
       // Always use '3d' design (other designs have been removed)
-      return { ...parsed, design: '3d' as AvatarDesign };
+      return { 
+        ...parsed, 
+        design: '3d' as AvatarDesign,
+        // Default ttsEnabled to false if not explicitly set to true
+        ttsEnabled: parsed.ttsEnabled === true,
+        selectedVoiceName: parsed.selectedVoiceName || null,
+      };
     }
   } catch {
     // localStorage not available or invalid JSON
   }
-  return { enabled: false, design: '3d', ttsEnabled: true };
+  // Default TTS to OFF - user must explicitly enable it
+  return { enabled: false, design: '3d', ttsEnabled: false, selectedVoiceName: null };
 }
 
 // Save avatar settings to localStorage
-function saveAvatarSettings(settings: { enabled: boolean; design: AvatarDesign; ttsEnabled: boolean }): void {
+function saveAvatarSettings(settings: { enabled: boolean; design: AvatarDesign; ttsEnabled: boolean; selectedVoiceName: string | null }): void {
   try {
     localStorage.setItem(STORAGE_KEY_AVATAR, JSON.stringify(settings));
   } catch {
@@ -198,10 +215,18 @@ interface AppState {
   setContentUrl: (url: string | null) => void;
   ttsEnabled: boolean;
   setTtsEnabled: (enabled: boolean) => void;
+  selectedVoiceName: string | null;
+  setSelectedVoiceName: (name: string | null) => void;
   
   // Tool confirmation for high-risk output tools
   pendingConfirmation: ToolConfirmationRequest | null;
   setPendingConfirmation: (confirmation: ToolConfirmationRequest | null) => void;
+
+  // Toast notifications
+  toasts: ToastMessage[];
+  addToast: (toast: ToastMessage) => void;
+  removeToast: (id: string) => void;
+  clearAllToasts: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -298,14 +323,14 @@ export const useStore = create<AppState>((set) => ({
   avatarModeEnabled: getInitialAvatarSettings().enabled,
   setAvatarModeEnabled: (enabled) => {
     set((state) => {
-      saveAvatarSettings({ enabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled });
+      saveAvatarSettings({ enabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled, selectedVoiceName: state.selectedVoiceName });
       return { avatarModeEnabled: enabled };
     });
   },
   avatarDesign: getInitialAvatarSettings().design,
   setAvatarDesign: (design) => {
     set((state) => {
-      saveAvatarSettings({ enabled: state.avatarModeEnabled, design, ttsEnabled: state.ttsEnabled });
+      saveAvatarSettings({ enabled: state.avatarModeEnabled, design, ttsEnabled: state.ttsEnabled, selectedVoiceName: state.selectedVoiceName });
       return { avatarDesign: design };
     });
   },
@@ -318,12 +343,32 @@ export const useStore = create<AppState>((set) => ({
   ttsEnabled: getInitialAvatarSettings().ttsEnabled,
   setTtsEnabled: (enabled) => {
     set((state) => {
-      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: enabled });
+      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: enabled, selectedVoiceName: state.selectedVoiceName });
       return { ttsEnabled: enabled };
+    });
+  },
+  selectedVoiceName: getInitialAvatarSettings().selectedVoiceName,
+  setSelectedVoiceName: (name) => {
+    set((state) => {
+      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled, selectedVoiceName: name });
+      return { selectedVoiceName: name };
     });
   },
   
   // Tool confirmation for high-risk output tools
   pendingConfirmation: null,
   setPendingConfirmation: (confirmation) => set({ pendingConfirmation: confirmation }),
+
+  // Toast notifications
+  toasts: [],
+  addToast: (toast) =>
+    set((state) => ({
+      // Limit to 5 toasts max, remove oldest if needed
+      toasts: [...state.toasts, toast].slice(-5),
+    })),
+  removeToast: (id) =>
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    })),
+  clearAllToasts: () => set({ toasts: [] }),
 }));

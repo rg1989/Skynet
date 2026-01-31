@@ -145,7 +145,7 @@ function TextWithLinks({ text, className }: { text: string; className?: string }
               href={part}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300 underline break-all"
+              className="text-violet-400 hover:text-violet-300 underline break-all"
             >
               {part}
             </a>

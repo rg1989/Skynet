@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useStore, type ToolsMode } from '../store';
 import { ConfirmModal } from './ConfirmModal';
+import { useToast } from './Toast';
 
 interface ProviderInfo {
   name: string;
@@ -13,20 +14,20 @@ interface ProviderInfo {
 // localStorage key for saving enabled tools before switching to Ollama
 const STORAGE_KEY_SAVED_TOOLS = 'skynet_saved_enabled_tools';
 
-type SettingsTab = 'providers' | 'system';
+type SettingsTab = 'general' | 'providers' | 'system';
 
 export function Settings() {
-  const { settings, setSettings } = useStore();
+  const { settings, setSettings, ttsEnabled, setTtsEnabled, selectedVoiceName, setSelectedVoiceName } = useStore();
+  const { showToast } = useToast();
   
-  // Get active tab from URL params, default to 'providers'
+  // Get active tab from URL params, default to 'general'
   const { tab } = useParams<{ tab: string }>();
-  const activeTab: SettingsTab = (tab === 'system' ? 'system' : 'providers');
+  const activeTab: SettingsTab = (tab === 'providers' ? 'providers' : tab === 'system' ? 'system' : 'general');
   
   // Local state for editable fields
   const [systemPrompt, setSystemPrompt] = useState('');
   const [promptDirty, setPromptDirty] = useState(false);
   const [savingPrompt, setSavingPrompt] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
   // API Keys state
   const [openaiKey, setOpenaiKey] = useState('');
@@ -37,6 +38,36 @@ export function Settings() {
   // Ollama switch modal state
   const [showOllamaModal, setShowOllamaModal] = useState(false);
 
+  // Voice settings state
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+  // Load available voices
+  useEffect(() => {
+    if (!isTtsSupported) return;
+
+    const loadVoices = () => {
+      const voices = speechSynthesis.getVoices();
+      setAvailableVoices(voices);
+      
+      // If we have a stored voice name but it's not set, find and set it
+      if (selectedVoiceName && voices.length > 0) {
+        const matchingVoice = voices.find(v => v.name === selectedVoiceName);
+        if (!matchingVoice) {
+          // Stored voice not found, clear the selection
+          setSelectedVoiceName(null);
+        }
+      }
+    };
+
+    loadVoices();
+    speechSynthesis.addEventListener('voiceschanged', loadVoices);
+
+    return () => {
+      speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+    };
+  }, [isTtsSupported, selectedVoiceName, setSelectedVoiceName]);
+
   // Fetch all settings on mount
   useEffect(() => {
     fetchProviders();
@@ -45,10 +76,7 @@ export function Settings() {
     fetchApiKeys();
   }, []);
 
-  const showMessage = (type: 'success' | 'error', text: string) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
-  };
+  // Use showToast from the Toast component for notifications
 
   const fetchProviders = async () => {
     try {
@@ -153,7 +181,7 @@ export function Settings() {
       }
       
       if (Object.keys(keys).length === 0) {
-        showMessage('error', 'No keys to save');
+        showToast('error', 'No keys to save');
         return;
       }
       
@@ -164,7 +192,7 @@ export function Settings() {
       });
       
       if (response.ok) {
-        showMessage('success', 'API keys saved. Testing connections...');
+        showToast('success', 'API keys saved. Testing connections...');
         setKeysDirty(false);
         
         // Refresh providers to update availability
@@ -192,14 +220,14 @@ export function Settings() {
         // Show combined result
         if (testResults.length > 0) {
           const allSuccess = testResults.every(r => r.startsWith('✓'));
-          showMessage(allSuccess ? 'success' : 'error', testResults.join(' | '));
+          showToast(allSuccess ? 'success' : 'error', testResults.join(' | '));
         }
       } else {
         const data = await response.json();
-        showMessage('error', data.error || 'Failed to save API keys');
+        showToast('error', data.error || 'Failed to save API keys');
       }
     } catch (error) {
-      showMessage('error', 'Failed to save API keys');
+      showToast('error', 'Failed to save API keys');
     } finally {
       setSavingKeys(false);
     }
@@ -252,7 +280,7 @@ export function Settings() {
       }
       return false;
     } catch (error) {
-      showMessage('error', 'Failed to change provider');
+      showToast('error', 'Failed to change provider');
       return false;
     }
   };
@@ -269,13 +297,13 @@ export function Settings() {
       await restoreSavedTools();
       await doProviderSwitch(provider);
       await fetchTools();
-      showMessage('success', `Switched to ${provider}. Tools restored.`);
+      showToast('success', `Switched to ${provider}. Tools restored.`);
       return;
     }
     
     // Normal switch (e.g., between cloud providers or already on Ollama)
     if (await doProviderSwitch(provider)) {
-      showMessage('success', `Switched to ${provider}`);
+      showToast('success', `Switched to ${provider}`);
     }
   };
 
@@ -294,7 +322,7 @@ export function Settings() {
     await fetchTools();
     
     setShowOllamaModal(false);
-    showMessage('success', 'Switched to Ollama. Meta-tools enabled for self-management.');
+    showToast('success', 'Switched to Ollama. Meta-tools enabled for self-management.');
   };
 
   const handleOllamaCancel = () => {
@@ -312,10 +340,10 @@ export function Settings() {
       if (response.ok) {
         const data = await response.json();
         setSettings({ currentModel: data.model });
-        showMessage('success', `Model changed to ${model}`);
+        showToast('success', `Model changed to ${model}`);
       }
     } catch (error) {
-      showMessage('error', 'Failed to change model');
+      showToast('error', 'Failed to change model');
     }
   };
 
@@ -329,10 +357,10 @@ export function Settings() {
       
       if (response.ok) {
         setSettings({ toolsMode: mode });
-        showMessage('success', `Tools mode: ${mode}`);
+        showToast('success', `Tools mode: ${mode}`);
       }
     } catch (error) {
-      showMessage('error', 'Failed to change tools mode');
+      showToast('error', 'Failed to change tools mode');
     }
   };
 
@@ -352,7 +380,7 @@ export function Settings() {
         });
       }
     } catch (error) {
-      showMessage('error', `Failed to toggle ${toolName}`);
+      showToast('error', `Failed to toggle ${toolName}`);
     }
   };
 
@@ -368,10 +396,10 @@ export function Settings() {
       if (response.ok) {
         setSettings({ systemPrompt, isDefaultPrompt: false });
         setPromptDirty(false);
-        showMessage('success', 'System prompt saved');
+        showToast('success', 'System prompt saved');
       }
     } catch (error) {
-      showMessage('error', 'Failed to save prompt');
+      showToast('error', 'Failed to save prompt');
     } finally {
       setSavingPrompt(false);
     }
@@ -386,28 +414,28 @@ export function Settings() {
         setSystemPrompt(data.prompt || '');
         setSettings({ systemPrompt: data.prompt || '', isDefaultPrompt: true });
         setPromptDirty(false);
-        showMessage('success', 'Reset to default prompt');
+        showToast('success', 'Reset to default prompt');
       }
     } catch (error) {
-      showMessage('error', 'Failed to reset prompt');
+      showToast('error', 'Failed to reset prompt');
     }
   };
 
   const handleWarmup = useCallback(async () => {
     try {
       setSettings({ warmingUp: true });
-      showMessage('success', 'Warming up model...');
+      showToast('success', 'Warming up model...');
       
       const response = await fetch('/api/warmup', { method: 'POST' });
       const data = await response.json();
       
       if (response.ok) {
-        showMessage('success', `Model warmed up in ${data.durationMs}ms`);
+        showToast('success', `Model warmed up in ${data.durationMs}ms`);
       } else {
-        showMessage('error', data.error || 'Warmup failed');
+        showToast('error', data.error || 'Warmup failed');
       }
     } catch (error) {
-      showMessage('error', 'Failed to warmup model');
+      showToast('error', 'Failed to warmup model');
     } finally {
       setSettings({ warmingUp: false });
     }
@@ -423,24 +451,28 @@ export function Settings() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      {/* Message toast */}
-      {message && (
-        <div className={`fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg z-50 ${
-          message.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
-        } text-white`}>
-          {message.text}
-        </div>
-      )}
-
       <h2 className="text-xl font-semibold mb-6">Settings</h2>
 
       {/* Tab Navigation */}
       <div className="flex gap-1 mb-6 bg-slate-800/50 p-1 rounded-xl border border-slate-700/50">
         <Link
+          to="/settings/general"
+          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            activeTab === 'general'
+              ? 'bg-violet-600 text-white'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          General
+        </Link>
+        <Link
           to="/settings/providers"
           className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
             activeTab === 'providers'
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-violet-600 text-white'
               : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
           }`}
         >
@@ -466,6 +498,89 @@ export function Settings() {
       </div>
 
       <div className="space-y-6">
+        {/* GENERAL TAB */}
+        {activeTab === 'general' && (
+          <>
+            {/* Voice & Audio Section */}
+            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+              <h3 className="font-medium mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                </svg>
+                Voice & Audio
+              </h3>
+
+              <p className="text-sm text-slate-400 mb-4">
+                Configure whether the AI speaks responses aloud and select a voice. These settings also apply to the Avatar mode.
+              </p>
+
+              {/* TTS Support Warning */}
+              {!isTtsSupported && (
+                <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                  <p className="text-sm text-amber-400">
+                    Text-to-speech is not supported in your browser.
+                  </p>
+                </div>
+              )}
+
+              {/* AI Voice Toggle */}
+              <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-lg mb-4">
+                <div className="flex-1">
+                  <div className="font-medium text-sm flex items-center gap-2">
+                    Enable AI Voice
+                    {ttsEnabled && (
+                      <span className="text-xs bg-emerald-600 px-2 py-0.5 rounded">On</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    When enabled, the AI will speak its responses aloud
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={ttsEnabled}
+                    onChange={(e) => {
+                      setTtsEnabled(e.target.checked);
+                      showToast('success', e.target.checked ? 'AI voice enabled' : 'AI voice disabled');
+                    }}
+                    disabled={!isTtsSupported}
+                    className="sr-only peer"
+                  />
+                  <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${!isTtsSupported ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                </label>
+              </div>
+
+              {/* Voice Selection */}
+              {isTtsSupported && (
+                <div className={ttsEnabled ? '' : 'opacity-50 pointer-events-none'}>
+                  <label className="block text-sm text-slate-400 mb-2">Voice</label>
+                  <select
+                    value={selectedVoiceName || ''}
+                    onChange={(e) => {
+                      const voiceName = e.target.value || null;
+                      setSelectedVoiceName(voiceName);
+                      showToast('success', voiceName ? `Voice changed to ${voiceName.split(' ').slice(0, 2).join(' ')}` : 'Voice set to System Default');
+                    }}
+                    disabled={!ttsEnabled}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                  >
+                    <option value="">System Default</option>
+                    {availableVoices.map((voice) => (
+                      <option key={voice.name} value={voice.name}>
+                        {voice.name} ({voice.lang})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Select a voice for the AI to use when speaking. Available voices depend on your browser and system.
+                  </p>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+
         {/* PROVIDERS TAB */}
         {activeTab === 'providers' && (
           <>

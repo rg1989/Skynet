@@ -74,7 +74,7 @@ export function CronManager() {
         <h2 className="text-lg font-semibold">Scheduled Tasks</h2>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm"
+          className="bg-violet-600 hover:bg-violet-700 px-3 py-1 rounded text-sm"
         >
           {showForm ? 'Cancel' : '+ New Task'}
         </button>

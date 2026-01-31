@@ -4,6 +4,7 @@ import { TaskList } from './components/TaskList';
 import { WorkflowManager } from './components/WorkflowManager';
 import { CronManager } from './components/CronManager';
 import { Settings } from './components/Settings';
+import { ToastContainer } from './components/Toast';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStore } from './store';
 
@@ -89,6 +90,9 @@ function Layout() {
 
   return (
     <div className="flex h-screen bg-[#15181c] text-white">
+      {/* Global Toast Container */}
+      <ToastContainer />
+
       {/* Sidebar */}
       <aside className="w-16 bg-[#1e2227] border-r border-slate-700/50 flex flex-col items-center py-4">
         {/* Logo */}
@@ -140,8 +144,8 @@ function Layout() {
           <Route path="/tasks" element={<PageWrapper title="Tasks"><TaskList /></PageWrapper>} />
           <Route path="/workflows" element={<PageWrapper title="Workflows"><WorkflowManager /></PageWrapper>} />
           <Route path="/cron" element={<PageWrapper title="Scheduled Tasks"><CronManager /></PageWrapper>} />
-          {/* Settings routes - redirect /settings to /settings/providers */}
-          <Route path="/settings" element={<Navigate to="/settings/providers" replace />} />
+          {/* Settings routes - redirect /settings to /settings/general */}
+          <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/:tab" element={<PageWrapper title="Settings"><Settings /></PageWrapper>} />
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />

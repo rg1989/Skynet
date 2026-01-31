@@ -74,7 +74,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
         href={href} 
         target="_blank" 
         rel="noopener noreferrer"
-        className="text-blue-400 hover:text-blue-300 underline"
+        className="text-violet-400 hover:text-violet-300 underline"
       >
         {children}
       </a>

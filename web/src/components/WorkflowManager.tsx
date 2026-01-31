@@ -74,7 +74,7 @@ function StatusBadge({ status }: { status: WorkflowRun['status'] }) {
 // Type badge component
 function TypeBadge({ type }: { type: 'file' | 'dynamic' }) {
   const styles = {
-    file: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    file: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
     dynamic: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   };
 
