@@ -1,0 +1,14 @@
+pyproject.toml
+skynet_voice.egg-info/PKG-INFO
+skynet_voice.egg-info/SOURCES.txt
+skynet_voice.egg-info/dependency_links.txt
+skynet_voice.egg-info/entry_points.txt
+skynet_voice.egg-info/requires.txt
+skynet_voice.egg-info/top_level.txt
+src/__init__.py
+src/config.py
+src/markdown_filter.py
+src/sentencizer.py
+src/server.py
+src/tts.py
+src/wakeword.py

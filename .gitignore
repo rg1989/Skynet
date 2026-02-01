@@ -34,3 +34,13 @@ prefect/tests/
 
 # Chat sessions (per-machine data)
 data/sessions/
+
+# voice service
+voice/venv/
+voice/data/
+voice/logs/
+voice/artifacts/
+voice/results/
+voice/reports/
+voice/tests/
+voice/tests/

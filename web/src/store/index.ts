@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 // LocalStorage keys
 const STORAGE_KEY_SESSION = 'skynet_current_session';
+const STORAGE_KEY_VOICE = 'skynet_voice_settings';
 
 // Get initial session key from localStorage or generate new one
 function getInitialSessionKey(): string {
@@ -20,6 +21,39 @@ function getInitialSessionKey(): string {
 function saveSessionKey(key: string): void {
   try {
     localStorage.setItem(STORAGE_KEY_SESSION, key);
+  } catch {
+    // localStorage not available
+  }
+}
+
+// Get initial voice settings from localStorage
+function getInitialVoiceSettings(): VoiceSettings {
+  const defaults: VoiceSettings = {
+    ttsEnabled: false,
+    ttsMuted: false,
+    ttsVoice: 'af_heart',
+    ttsSpeed: 1.1,
+    wakeWordEnabled: false,
+    wakeWordModel: 'hey_jarvis',
+    wakeWordThreshold: 0.5,
+    wakeWordTimeoutSeconds: 10,
+  };
+  
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_VOICE);
+    if (stored) {
+      return { ...defaults, ...JSON.parse(stored) };
+    }
+  } catch {
+    // localStorage not available or parse error
+  }
+  return defaults;
+}
+
+// Save voice settings to localStorage
+function saveVoiceSettings(settings: VoiceSettings): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_VOICE, JSON.stringify(settings));
   } catch {
     // localStorage not available
   }
@@ -77,7 +111,22 @@ export interface ToolConfirmationRequest {
 
 export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
 
-export type AvatarDesign = '3d';
+// Voice settings
+export interface VoiceSettings {
+  // TTS settings
+  ttsEnabled: boolean;
+  ttsMuted: boolean;  // Muted in chat, but still enabled in settings
+  ttsVoice: string;
+  ttsSpeed: number;
+  
+  // Wake word settings
+  wakeWordEnabled: boolean;
+  wakeWordModel: string;
+  wakeWordThreshold: number;
+  wakeWordTimeoutSeconds: number;
+}
+
+export type WakeWordStatus = 'listening' | 'active' | 'disabled';
 
 // Toast notification
 export interface ToastMessage {
@@ -87,9 +136,6 @@ export interface ToastMessage {
   duration: number; // ms
   createdAt: number;
 }
-
-// LocalStorage key for avatar mode settings
-const STORAGE_KEY_AVATAR = 'skynet_avatar_mode';
 
 export interface Settings {
   // Provider/Model
@@ -109,42 +155,6 @@ export interface Settings {
   // Loading states
   loading: boolean;
   warmingUp: boolean;
-}
-
-// Get initial avatar mode settings from localStorage
-function getInitialAvatarSettings(): {
-  enabled: boolean;
-  design: AvatarDesign;
-  ttsEnabled: boolean;
-  selectedVoiceName: string | null;
-} {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_AVATAR);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      // Always use '3d' design (other designs have been removed)
-      return { 
-        ...parsed, 
-        design: '3d' as AvatarDesign,
-        // Default ttsEnabled to false if not explicitly set to true
-        ttsEnabled: parsed.ttsEnabled === true,
-        selectedVoiceName: parsed.selectedVoiceName || null,
-      };
-    }
-  } catch {
-    // localStorage not available or invalid JSON
-  }
-  // Default TTS to OFF - user must explicitly enable it
-  return { enabled: false, design: '3d', ttsEnabled: false, selectedVoiceName: null };
-}
-
-// Save avatar settings to localStorage
-function saveAvatarSettings(settings: { enabled: boolean; design: AvatarDesign; ttsEnabled: boolean; selectedVoiceName: string | null }): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_AVATAR, JSON.stringify(settings));
-  } catch {
-    // localStorage not available
-  }
 }
 
 interface AppState {
@@ -201,22 +211,6 @@ interface AppState {
   // Legacy provider (for backwards compatibility)
   provider: string;
   setProvider: (provider: string) => void;
-
-  // Avatar Mode
-  avatarModeEnabled: boolean;
-  setAvatarModeEnabled: (enabled: boolean) => void;
-  avatarDesign: AvatarDesign;
-  setAvatarDesign: (design: AvatarDesign) => void;
-  avatarRatio: number; // 0.2 to 0.8, default 0.4 (40% avatar, 60% chat)
-  setAvatarRatio: (ratio: number) => void;
-  showContent: boolean;
-  setShowContent: (show: boolean) => void;
-  contentUrl: string | null;
-  setContentUrl: (url: string | null) => void;
-  ttsEnabled: boolean;
-  setTtsEnabled: (enabled: boolean) => void;
-  selectedVoiceName: string | null;
-  setSelectedVoiceName: (name: string | null) => void;
   
   // Tool confirmation for high-risk output tools
   pendingConfirmation: ToolConfirmationRequest | null;
@@ -227,6 +221,16 @@ interface AppState {
   addToast: (toast: ToastMessage) => void;
   removeToast: (id: string) => void;
   clearAllToasts: () => void;
+
+  // Voice settings and state
+  voiceSettings: VoiceSettings;
+  setVoiceSettings: (updates: Partial<VoiceSettings>) => void;
+  voiceServiceAvailable: boolean;
+  setVoiceServiceAvailable: (available: boolean) => void;
+  wakeWordStatus: WakeWordStatus;
+  setWakeWordStatus: (status: WakeWordStatus) => void;
+  isTtsSpeaking: boolean;
+  setIsTtsSpeaking: (speaking: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -318,42 +322,6 @@ export const useStore = create<AppState>((set) => ({
   // Legacy provider (for backwards compatibility) - empty by default
   provider: '',
   setProvider: (provider) => set({ provider }),
-
-  // Avatar Mode - initialized from localStorage
-  avatarModeEnabled: getInitialAvatarSettings().enabled,
-  setAvatarModeEnabled: (enabled) => {
-    set((state) => {
-      saveAvatarSettings({ enabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled, selectedVoiceName: state.selectedVoiceName });
-      return { avatarModeEnabled: enabled };
-    });
-  },
-  avatarDesign: getInitialAvatarSettings().design,
-  setAvatarDesign: (design) => {
-    set((state) => {
-      saveAvatarSettings({ enabled: state.avatarModeEnabled, design, ttsEnabled: state.ttsEnabled, selectedVoiceName: state.selectedVoiceName });
-      return { avatarDesign: design };
-    });
-  },
-  avatarRatio: 0.4, // 40% avatar, 60% chat
-  setAvatarRatio: (ratio) => set({ avatarRatio: Math.min(0.8, Math.max(0.2, ratio)) }),
-  showContent: false,
-  setShowContent: (show) => set({ showContent: show }),
-  contentUrl: null,
-  setContentUrl: (url) => set({ contentUrl: url }),
-  ttsEnabled: getInitialAvatarSettings().ttsEnabled,
-  setTtsEnabled: (enabled) => {
-    set((state) => {
-      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: enabled, selectedVoiceName: state.selectedVoiceName });
-      return { ttsEnabled: enabled };
-    });
-  },
-  selectedVoiceName: getInitialAvatarSettings().selectedVoiceName,
-  setSelectedVoiceName: (name) => {
-    set((state) => {
-      saveAvatarSettings({ enabled: state.avatarModeEnabled, design: state.avatarDesign, ttsEnabled: state.ttsEnabled, selectedVoiceName: name });
-      return { selectedVoiceName: name };
-    });
-  },
   
   // Tool confirmation for high-risk output tools
   pendingConfirmation: null,
@@ -371,4 +339,19 @@ export const useStore = create<AppState>((set) => ({
       toasts: state.toasts.filter((t) => t.id !== id),
     })),
   clearAllToasts: () => set({ toasts: [] }),
+
+  // Voice settings and state - load from localStorage
+  voiceSettings: getInitialVoiceSettings(),
+  setVoiceSettings: (updates) =>
+    set((state) => {
+      const newSettings = { ...state.voiceSettings, ...updates };
+      saveVoiceSettings(newSettings);
+      return { voiceSettings: newSettings };
+    }),
+  voiceServiceAvailable: false,
+  setVoiceServiceAvailable: (available) => set({ voiceServiceAvailable: available }),
+  wakeWordStatus: 'disabled',
+  setWakeWordStatus: (status) => set({ wakeWordStatus: status }),
+  isTtsSpeaking: false,
+  setIsTtsSpeaking: (speaking) => set({ isTtsSpeaking: speaking }),
 }));

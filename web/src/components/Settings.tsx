@@ -11,18 +11,28 @@ interface ProviderInfo {
   isAvailable: boolean;
 }
 
+interface VoiceInfo {
+  id: string;
+  name: string;
+}
+
+interface WakeWordModel {
+  id: string;
+  name: string;
+}
+
 // localStorage key for saving enabled tools before switching to Ollama
 const STORAGE_KEY_SAVED_TOOLS = 'skynet_saved_enabled_tools';
 
-type SettingsTab = 'general' | 'providers' | 'system';
+type SettingsTab = 'providers' | 'system' | 'voice';
 
 export function Settings() {
-  const { settings, setSettings, ttsEnabled, setTtsEnabled, selectedVoiceName, setSelectedVoiceName } = useStore();
+  const { settings, setSettings, voiceSettings, setVoiceSettings, voiceServiceAvailable, setVoiceServiceAvailable } = useStore();
   const { showToast } = useToast();
   
-  // Get active tab from URL params, default to 'general'
+  // Get active tab from URL params, default to 'providers'
   const { tab } = useParams<{ tab: string }>();
-  const activeTab: SettingsTab = (tab === 'providers' ? 'providers' : tab === 'system' ? 'system' : 'general');
+  const activeTab: SettingsTab = (tab === 'system' ? 'system' : tab === 'voice' ? 'voice' : 'providers');
   
   // Local state for editable fields
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -39,34 +49,8 @@ export function Settings() {
   const [showOllamaModal, setShowOllamaModal] = useState(false);
 
   // Voice settings state
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
-
-  // Load available voices
-  useEffect(() => {
-    if (!isTtsSupported) return;
-
-    const loadVoices = () => {
-      const voices = speechSynthesis.getVoices();
-      setAvailableVoices(voices);
-      
-      // If we have a stored voice name but it's not set, find and set it
-      if (selectedVoiceName && voices.length > 0) {
-        const matchingVoice = voices.find(v => v.name === selectedVoiceName);
-        if (!matchingVoice) {
-          // Stored voice not found, clear the selection
-          setSelectedVoiceName(null);
-        }
-      }
-    };
-
-    loadVoices();
-    speechSynthesis.addEventListener('voiceschanged', loadVoices);
-
-    return () => {
-      speechSynthesis.removeEventListener('voiceschanged', loadVoices);
-    };
-  }, [isTtsSupported, selectedVoiceName, setSelectedVoiceName]);
+  const [availableVoices, setAvailableVoices] = useState<VoiceInfo[]>([]);
+  const [availableWakeWordModels, setAvailableWakeWordModels] = useState<WakeWordModel[]>([]);
 
   // Fetch all settings on mount
   useEffect(() => {
@@ -74,6 +58,9 @@ export function Settings() {
     fetchTools();
     fetchSystemPrompt();
     fetchApiKeys();
+    fetchVoiceStatus();
+    fetchVoices();
+    fetchWakeWordModels();
   }, []);
 
   // Use showToast from the Toast component for notifications
@@ -148,6 +135,76 @@ export function Settings() {
       setAnthropicKey(data.anthropic?.configured ? '••••••••••••••••' : '');
     } catch (error) {
       console.error('Failed to fetch API keys:', error);
+    }
+  };
+
+  const fetchVoiceStatus = async () => {
+    try {
+      const response = await fetch('/api/voice/status');
+      const data = await response.json();
+      setVoiceServiceAvailable(data.available && data.running);
+    } catch (error) {
+      console.error('Failed to fetch voice status:', error);
+      setVoiceServiceAvailable(false);
+    }
+  };
+
+  const fetchVoices = async () => {
+    try {
+      const response = await fetch('/api/voice/voices');
+      const data = await response.json();
+      if (data.voices) {
+        const voices = Object.entries(data.voices).map(([id, name]) => ({
+          id,
+          name: name as string,
+        }));
+        setAvailableVoices(voices);
+      }
+    } catch (error) {
+      console.error('Failed to fetch voices:', error);
+    }
+  };
+
+  const fetchWakeWordModels = async () => {
+    try {
+      const response = await fetch('/api/voice/wakeword/models');
+      const data = await response.json();
+      if (data.models) {
+        const models = Object.entries(data.models).map(([id, name]) => ({
+          id,
+          name: name as string,
+        }));
+        setAvailableWakeWordModels(models);
+      }
+    } catch (error) {
+      console.error('Failed to fetch wake word models:', error);
+    }
+  };
+
+  const handleVoiceSettingChange = async (updates: Partial<typeof voiceSettings>) => {
+    setVoiceSettings(updates);
+    
+    try {
+      await fetch('/api/voice/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tts: {
+            enabled: updates.ttsEnabled ?? voiceSettings.ttsEnabled,
+            muted: updates.ttsMuted ?? voiceSettings.ttsMuted,
+            voice: updates.ttsVoice ?? voiceSettings.ttsVoice,
+            speed: updates.ttsSpeed ?? voiceSettings.ttsSpeed,
+          },
+          wakeword: {
+            enabled: updates.wakeWordEnabled ?? voiceSettings.wakeWordEnabled,
+            model: updates.wakeWordModel ?? voiceSettings.wakeWordModel,
+            threshold: updates.wakeWordThreshold ?? voiceSettings.wakeWordThreshold,
+            timeoutSeconds: updates.wakeWordTimeoutSeconds ?? voiceSettings.wakeWordTimeoutSeconds,
+          },
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to update voice settings:', error);
     }
   };
 
@@ -456,19 +513,6 @@ export function Settings() {
       {/* Tab Navigation */}
       <div className="flex gap-1 mb-6 bg-slate-800/50 p-1 rounded-xl border border-slate-700/50">
         <Link
-          to="/settings/general"
-          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-            activeTab === 'general'
-              ? 'bg-violet-600 text-white'
-              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-          </svg>
-          General
-        </Link>
-        <Link
           to="/settings/providers"
           className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
             activeTab === 'providers'
@@ -495,92 +539,22 @@ export function Settings() {
           </svg>
           System Prompt & Tools
         </Link>
+        <Link
+          to="/settings/voice"
+          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            activeTab === 'voice'
+              ? 'bg-violet-600 text-white'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+          Voice
+        </Link>
       </div>
 
       <div className="space-y-6">
-        {/* GENERAL TAB */}
-        {activeTab === 'general' && (
-          <>
-            {/* Voice & Audio Section */}
-            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
-              <h3 className="font-medium mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                </svg>
-                Voice & Audio
-              </h3>
-
-              <p className="text-sm text-slate-400 mb-4">
-                Configure whether the AI speaks responses aloud and select a voice. These settings also apply to the Avatar mode.
-              </p>
-
-              {/* TTS Support Warning */}
-              {!isTtsSupported && (
-                <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                  <p className="text-sm text-amber-400">
-                    Text-to-speech is not supported in your browser.
-                  </p>
-                </div>
-              )}
-
-              {/* AI Voice Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-lg mb-4">
-                <div className="flex-1">
-                  <div className="font-medium text-sm flex items-center gap-2">
-                    Enable AI Voice
-                    {ttsEnabled && (
-                      <span className="text-xs bg-emerald-600 px-2 py-0.5 rounded">On</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    When enabled, the AI will speak its responses aloud
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer ml-4">
-                  <input
-                    type="checkbox"
-                    checked={ttsEnabled}
-                    onChange={(e) => {
-                      setTtsEnabled(e.target.checked);
-                      showToast('success', e.target.checked ? 'AI voice enabled' : 'AI voice disabled');
-                    }}
-                    disabled={!isTtsSupported}
-                    className="sr-only peer"
-                  />
-                  <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${!isTtsSupported ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
-                </label>
-              </div>
-
-              {/* Voice Selection */}
-              {isTtsSupported && (
-                <div className={ttsEnabled ? '' : 'opacity-50 pointer-events-none'}>
-                  <label className="block text-sm text-slate-400 mb-2">Voice</label>
-                  <select
-                    value={selectedVoiceName || ''}
-                    onChange={(e) => {
-                      const voiceName = e.target.value || null;
-                      setSelectedVoiceName(voiceName);
-                      showToast('success', voiceName ? `Voice changed to ${voiceName.split(' ').slice(0, 2).join(' ')}` : 'Voice set to System Default');
-                    }}
-                    disabled={!ttsEnabled}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                  >
-                    <option value="">System Default</option>
-                    {availableVoices.map((voice) => (
-                      <option key={voice.name} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Select a voice for the AI to use when speaking. Available voices depend on your browser and system.
-                  </p>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
         {/* PROVIDERS TAB */}
         {activeTab === 'providers' && (
           <>
@@ -823,6 +797,200 @@ export function Settings() {
                   ))}
                 </div>
               )}
+            </section>
+          </>
+        )}
+
+        {/* VOICE TAB */}
+        {activeTab === 'voice' && (
+          <>
+            {/* Voice Service Status */}
+            {!voiceServiceAvailable && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <div>
+                    <p className="text-amber-400 font-medium">Voice Service Not Available</p>
+                    <p className="text-sm text-slate-400 mt-1">
+                      To enable TTS and wake word features, set up the voice service:
+                    </p>
+                    <code className="block text-xs text-slate-500 mt-2 bg-slate-900 p-2 rounded font-mono">
+                      cd voice && python3 -m venv venv && source venv/bin/activate && pip install -e .
+                    </code>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TTS Settings Section */}
+            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+              <h3 className="font-medium mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.586a2 2 0 001.414.586h1.586a1 1 0 01.707.293l2.414 2.414a1 1 0 001.414 0l.586-.586a1 1 0 00.293-.707V6a1 1 0 00-.293-.707l-.586-.586a1 1 0 00-1.414 0L9.293 7.121A1 1 0 018.586 7.414H7a2 2 0 00-2 2v4.172a2 2 0 00.586 1.414z" />
+                </svg>
+                Text-to-Speech (TTS)
+              </h3>
+
+              {/* TTS Enable Toggle */}
+              <div className="flex items-center justify-between mb-4 p-3 bg-slate-900/50 rounded-lg">
+                <div>
+                  <div className="font-medium text-sm">Enable TTS</div>
+                  <div className="text-xs text-slate-500">Read AI responses aloud</div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={voiceSettings.ttsEnabled}
+                    onChange={(e) => {
+                      handleVoiceSettingChange({ ttsEnabled: e.target.checked });
+                      showToast('success', e.target.checked ? 'TTS enabled' : 'TTS disabled');
+                    }}
+                    disabled={!voiceServiceAvailable}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-disabled:opacity-50"></div>
+                </label>
+              </div>
+
+              {/* Voice Selector */}
+              <div className="mb-4">
+                <label className="block text-sm text-slate-400 mb-2">Voice</label>
+                <select
+                  value={voiceSettings.ttsVoice}
+                  onChange={(e) => {
+                    handleVoiceSettingChange({ ttsVoice: e.target.value });
+                    showToast('success', 'Voice changed');
+                  }}
+                  disabled={!voiceServiceAvailable || !voiceSettings.ttsEnabled}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                >
+                  {availableVoices.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Speed Slider */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Speed: {voiceSettings.ttsSpeed.toFixed(1)}x
+                </label>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value={voiceSettings.ttsSpeed}
+                  onChange={(e) => handleVoiceSettingChange({ ttsSpeed: parseFloat(e.target.value) })}
+                  disabled={!voiceServiceAvailable || !voiceSettings.ttsEnabled}
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-500 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                  <span>0.5x</span>
+                  <span>1.0x</span>
+                  <span>2.0x</span>
+                </div>
+              </div>
+            </section>
+
+            {/* Wake Word Settings Section */}
+            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50 mt-6">
+              <h3 className="font-medium mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                Wake Word Detection
+              </h3>
+
+              {/* Wake Word Enable Toggle */}
+              <div className="flex items-center justify-between mb-4 p-3 bg-slate-900/50 rounded-lg">
+                <div>
+                  <div className="font-medium text-sm">Enable Wake Word</div>
+                  <div className="text-xs text-slate-500">Say the wake word to start listening</div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={voiceSettings.wakeWordEnabled}
+                    onChange={(e) => {
+                      handleVoiceSettingChange({ wakeWordEnabled: e.target.checked });
+                      showToast('success', e.target.checked ? 'Wake word enabled' : 'Wake word disabled');
+                    }}
+                    disabled={!voiceServiceAvailable}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-disabled:opacity-50"></div>
+                </label>
+              </div>
+
+              {/* Wake Word Model Selector */}
+              <div className="mb-4">
+                <label className="block text-sm text-slate-400 mb-2">Wake Word</label>
+                <select
+                  value={voiceSettings.wakeWordModel}
+                  onChange={(e) => {
+                    handleVoiceSettingChange({ wakeWordModel: e.target.value });
+                    showToast('success', 'Wake word changed');
+                  }}
+                  disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                >
+                  {availableWakeWordModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Threshold Slider */}
+              <div className="mb-4">
+                <label className="block text-sm text-slate-400 mb-2">
+                  Sensitivity: {Math.round(voiceSettings.wakeWordThreshold * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0.3"
+                  max="0.8"
+                  step="0.05"
+                  value={voiceSettings.wakeWordThreshold}
+                  onChange={(e) => handleVoiceSettingChange({ wakeWordThreshold: parseFloat(e.target.value) })}
+                  disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                  <span>Less sensitive</span>
+                  <span>More sensitive</span>
+                </div>
+              </div>
+
+              {/* Timeout */}
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">
+                  Timeout: {voiceSettings.wakeWordTimeoutSeconds}s
+                </label>
+                <input
+                  type="range"
+                  min="5"
+                  max="30"
+                  step="1"
+                  value={voiceSettings.wakeWordTimeoutSeconds}
+                  onChange={(e) => handleVoiceSettingChange({ wakeWordTimeoutSeconds: parseInt(e.target.value) })}
+                  disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
+                />
+                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                  <span>5s</span>
+                  <span>30s</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  How long to stay active after wake word before returning to listening
+                </p>
+              </div>
             </section>
           </>
         )}

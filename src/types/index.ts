@@ -125,6 +125,12 @@ export type WSEventType =
   | 'task:updated'
   | 'task:deleted'
   | 'task:triggered'
+  | 'voice:tts_audio'       // TTS audio segment from voice service
+  | 'voice:tts_start'       // TTS started for message
+  | 'voice:tts_complete'    // TTS finished for message
+  | 'voice:wake_status'     // Wake word state change
+  | 'voice:settings'        // Voice settings update
+  | 'voice:connected'       // Voice service connected
   | 'error';
 
 export interface WSEvent {

@@ -1,27 +1,33 @@
 import { useEffect } from 'react';
 import { useStore } from '../store';
+import { useToast } from './Toast';
 
 interface ChatHeaderProps {
   isConnected: boolean;
   title?: string;
 }
 
-// Robot face icon for Avatar Mode
-function AvatarModeIcon() {
+// Speaker icons
+function SpeakerOnIcon() {
   return (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <rect x="4" y="6" width="16" height="14" rx="3" strokeWidth={1.5} />
-      <circle cx="9" cy="12" r="2" fill="currentColor" />
-      <circle cx="15" cy="12" r="2" fill="currentColor" />
-      <path d="M9 16h6" strokeWidth={1.5} strokeLinecap="round" />
-      <line x1="12" y1="6" x2="12" y2="3" strokeWidth={1.5} strokeLinecap="round" />
-      <circle cx="12" cy="2" r="1" fill="currentColor" />
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+    </svg>
+  );
+}
+
+function SpeakerOffIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
     </svg>
   );
 }
 
 export function ChatHeader({ isConnected, title = 'Skynet' }: ChatHeaderProps) {
-  const { settings, setSettings, avatarModeEnabled, setAvatarModeEnabled } = useStore();
+  const { settings, setSettings, voiceSettings, setVoiceSettings } = useStore();
+  const { showToast } = useToast();
 
   // Fetch current provider/model on mount
   useEffect(() => {
@@ -59,6 +65,24 @@ export function ChatHeader({ isConnected, title = 'Skynet' }: ChatHeaderProps) {
       ? `${settings.currentProvider}/${settings.currentModel.split(':')[0]}`
       : settings.currentProvider || 'No provider';
 
+  // Toggle TTS mute
+  const toggleTtsMuted = async () => {
+    const newMuted = !voiceSettings.ttsMuted;
+    setVoiceSettings({ ttsMuted: newMuted });
+    showToast('success', newMuted ? 'Voice responses muted' : 'Voice responses unmuted');
+    
+    // Sync with backend
+    try {
+      await fetch('/api/voice/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tts: { muted: newMuted } }),
+      });
+    } catch (error) {
+      console.error('Failed to sync TTS mute state:', error);
+    }
+  };
+
   return (
     <header className="h-14 border-b border-slate-700/50 flex items-center px-6 justify-between bg-[#1e2227]">
       <div className="flex items-center gap-3">
@@ -70,21 +94,23 @@ export function ChatHeader({ isConnected, title = 'Skynet' }: ChatHeaderProps) {
           </span>
         )}
       </div>
-      <div className="flex items-center gap-3">
-        {/* Avatar Mode toggle */}
-        <button
-          onClick={() => setAvatarModeEnabled(!avatarModeEnabled)}
-          className={`px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
-            avatarModeEnabled
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-600/50 hover:text-slate-300'
-          }`}
-          title={avatarModeEnabled ? 'Exit Avatar Mode' : 'Enter Avatar Mode'}
-        >
-          <AvatarModeIcon />
-          <span className="text-sm">Avatar</span>
-        </button>
-
+      
+      <div className="flex items-center gap-4">
+        {/* TTS Mute Button - only show when TTS is enabled */}
+        {voiceSettings.ttsEnabled && (
+          <button
+            onClick={toggleTtsMuted}
+            className={`p-2 rounded-lg transition-colors ${
+              voiceSettings.ttsMuted
+                ? 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'
+                : 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30'
+            }`}
+            title={voiceSettings.ttsMuted ? 'Voice responses muted' : 'Voice responses enabled'}
+          >
+            {voiceSettings.ttsMuted ? <SpeakerOffIcon /> : <SpeakerOnIcon />}
+          </button>
+        )}
+        
         {/* Connection status */}
         <div className={`flex items-center gap-2 text-sm ${
           isConnected ? 'text-emerald-400' : 'text-red-400'

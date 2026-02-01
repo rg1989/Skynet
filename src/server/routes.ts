@@ -6,6 +6,7 @@ import type { WSHandler } from './ws-handler.js';
 import type { Scheduler } from '../scheduler/cron.js';
 import type { AgentRunner } from '../agent/runner.js';
 import type { ProviderManager } from '../providers/index.js';
+import type { VoiceServiceManager } from '../voice/manager.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { getMemoryStore } from '../skills/memory.js';
 
@@ -93,6 +94,7 @@ async function deleteSession(key: string): Promise<boolean> {
 let scheduler: Scheduler | null = null;
 let agentRunner: AgentRunner | null = null;
 let providerManager: ProviderManager | null = null;
+let voiceManager: VoiceServiceManager | null = null;
 
 export function setScheduler(s: Scheduler): void {
   scheduler = s;
@@ -104,6 +106,10 @@ export function setAgentRunner(a: AgentRunner): void {
 
 export function setProviderManager(p: ProviderManager): void {
   providerManager = p;
+}
+
+export function setVoiceManager(v: VoiceServiceManager): void {
+  voiceManager = v;
 }
 
 export function createRoutes(config: Config, wsHandler: WSHandler): Router {
@@ -833,6 +839,122 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to warmup' });
     }
+  });
+
+  // ========================================
+  // Voice Service (TTS & Wake Word)
+  // ========================================
+
+  // Get voice service status
+  router.get('/voice/status', (_req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.json({
+        available: false,
+        running: false,
+        connected: false,
+      });
+      return;
+    }
+
+    res.json({
+      available: voiceManager.isAvailable(),
+      running: voiceManager.isRunning(),
+      connected: voiceManager.isConnected(),
+    });
+  });
+
+  // Get voice settings
+  router.get('/voice/settings', (_req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.status(503).json({ error: 'Voice service not available' });
+      return;
+    }
+
+    res.json(voiceManager.getSettings());
+  });
+
+  // Update voice settings
+  router.put('/voice/settings', async (req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.status(503).json({ error: 'Voice service not available' });
+      return;
+    }
+
+    const { tts, wakeword } = req.body;
+
+    try {
+      if (tts) {
+        if (typeof tts.enabled === 'boolean') {
+          voiceManager.setTtsEnabled(tts.enabled);
+        }
+        if (typeof tts.muted === 'boolean') {
+          voiceManager.setTtsMuted(tts.muted);
+        }
+        if (tts.voice) {
+          voiceManager.setVoice(tts.voice);
+        }
+        if (typeof tts.speed === 'number') {
+          voiceManager.setSpeed(tts.speed);
+        }
+      }
+
+      if (wakeword) {
+        voiceManager.setWakewordSettings(wakeword);
+      }
+
+      res.json(voiceManager.getSettings());
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to update settings' });
+    }
+  });
+
+  // Get available TTS voices
+  router.get('/voice/voices', (_req: Request, res: Response) => {
+    // These are the Kokoro TTS voices
+    const voices = {
+      'af_heart': 'American Female - Heart (warm, friendly)',
+      'af_bella': 'American Female - Bella',
+      'af_sarah': 'American Female - Sarah',
+      'af_nicole': 'American Female - Nicole',
+      'af_sky': 'American Female - Sky',
+      'am_adam': 'American Male - Adam',
+      'am_michael': 'American Male - Michael',
+      'bf_emma': 'British Female - Emma',
+      'bf_isabella': 'British Female - Isabella',
+      'bm_george': 'British Male - George',
+      'bm_lewis': 'British Male - Lewis',
+    };
+
+    res.json({ voices });
+  });
+
+  // Get available wake word models
+  router.get('/voice/wakeword/models', (_req: Request, res: Response) => {
+    const models = {
+      'hey_jarvis': 'Hey Jarvis',
+      'alexa': 'Alexa',
+      'hey_mycroft': 'Hey Mycroft',
+      'hey_rhasspy': 'Hey Rhasspy',
+    };
+
+    res.json({ models });
+  });
+
+  // Synthesize text (for testing)
+  router.post('/voice/synthesize', async (req: Request, res: Response) => {
+    if (!voiceManager || !voiceManager.isConnected()) {
+      res.status(503).json({ error: 'Voice service not connected' });
+      return;
+    }
+
+    const { text, messageId } = req.body;
+    if (!text) {
+      res.status(400).json({ error: 'Text is required' });
+      return;
+    }
+
+    voiceManager.synthesize(text, messageId || 'test', true);
+    res.json({ status: 'synthesizing' });
   });
 
   return router;

@@ -144,8 +144,8 @@ function Layout() {
           <Route path="/tasks" element={<PageWrapper title="Tasks"><TaskList /></PageWrapper>} />
           <Route path="/workflows" element={<PageWrapper title="Workflows"><WorkflowManager /></PageWrapper>} />
           <Route path="/cron" element={<PageWrapper title="Scheduled Tasks"><CronManager /></PageWrapper>} />
-          {/* Settings routes - redirect /settings to /settings/general */}
-          <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
+          {/* Settings routes - redirect /settings to /settings/providers */}
+          <Route path="/settings" element={<Navigate to="/settings/providers" replace />} />
           <Route path="/settings/:tab" element={<PageWrapper title="Settings"><Settings /></PageWrapper>} />
           {/* Catch-all redirect to home */}
           <Route path="*" element={<Navigate to="/" replace />} />
