@@ -75,7 +75,26 @@ export function useWebSocket() {
     removeActiveTool,
     clearActiveTools,
     setPendingConfirmation,
+    setNeedsOnboarding,
+    setOnboardingFacts,
   } = useStore();
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    fetch('/api/onboarding/status')
+      .then(res => res.json())
+      .then(data => {
+        setNeedsOnboarding(data.needsSetup);
+        if (!data.needsSetup && data.facts) {
+          setOnboardingFacts(data.facts);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to check onboarding status:', err);
+        // Default to not needing onboarding on error
+        setNeedsOnboarding(false);
+      });
+  }, [setNeedsOnboarding, setOnboardingFacts]);
 
   useEffect(() => {
     // Only initialize once per app lifetime (module-level flag survives StrictMode remounts)

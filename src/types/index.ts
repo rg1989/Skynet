@@ -139,6 +139,9 @@ export interface WSEvent {
   timestamp: number;
 }
 
+// Authorization scope levels for persistent approvals
+export type AuthorizationScope = 'exact' | 'pattern' | 'tool';
+
 // Tool confirmation request/response for high-risk output tools
 export interface ToolConfirmationRequest {
   confirmId: string;
@@ -146,11 +149,23 @@ export interface ToolConfirmationRequest {
   toolName: string;
   toolParams: Record<string, unknown>;
   riskReason: string;
+  // Extended fields for authorization
+  commandExplanation?: {
+    summary: string;
+    details: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    warnings: string[];
+  };
+  suggestedScopes?: AuthorizationScope[];
+  canRemember?: boolean;
 }
 
 export interface ToolConfirmationResponse {
   confirmId: string;
   approved: boolean;
+  // Extended fields for authorization
+  remember?: boolean;
+  scope?: AuthorizationScope;
 }
 
 // Memory types

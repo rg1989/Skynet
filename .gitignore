@@ -13,9 +13,32 @@ web/dist/
 # Playwright artifacts
 .playwright-mcp/
 
-# Optional: IDE and OS files
+# IDE and OS files
 .DS_Store
 *.log
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Data storage (runtime data, not source)
+data/
+
+# Chat sessions (per-machine data)
+data/sessions/
+
+# Voice service
+voice/venv/
+voice/data/
+voice/logs/
+voice/artifacts/
+voice/results/
+voice/reports/
+voice/tests/
 
 # Prefect
 prefect/venv/
@@ -25,22 +48,3 @@ prefect/artifacts/
 prefect/results/
 prefect/reports/
 prefect/tests/
-prefect/tests/
-
-# environment variables
-.env
-.env.local
-.env.*.local
-
-# Chat sessions (per-machine data)
-data/sessions/
-
-# voice service
-voice/venv/
-voice/data/
-voice/logs/
-voice/artifacts/
-voice/results/
-voice/reports/
-voice/tests/
-voice/tests/

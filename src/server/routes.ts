@@ -719,6 +719,50 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
     }
   });
 
+  // Enable all tools
+  router.post('/tools/enable-all', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      const skills = agentRunner?.getSkills() || [];
+      
+      let enabledCount = 0;
+      for (const skill of skills) {
+        runtimeConfig.enableTool(skill.name);
+        enabledCount++;
+      }
+      
+      res.json({ 
+        status: 'ok', 
+        enabledCount,
+        message: `Enabled ${enabledCount} tools.`,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to enable tools' });
+    }
+  });
+
+  // Disable all tools
+  router.post('/tools/disable-all', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      const skills = agentRunner?.getSkills() || [];
+      
+      let disabledCount = 0;
+      for (const skill of skills) {
+        runtimeConfig.disableTool(skill.name);
+        disabledCount++;
+      }
+      
+      res.json({ 
+        status: 'ok', 
+        disabledCount,
+        message: `Disabled ${disabledCount} tools.`,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to disable tools' });
+    }
+  });
+
   // Update tools mode
   router.put('/config/tools-mode', async (req: Request, res: Response) => {
     const { mode } = req.body;
@@ -955,6 +999,129 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
 
     voiceManager.synthesize(text, messageId || 'test', true);
     res.json({ status: 'synthesizing' });
+  });
+
+  // ========================================
+  // Onboarding
+  // ========================================
+
+  // Get onboarding status
+  router.get('/onboarding/status', (_req: Request, res: Response) => {
+    try {
+      const memoryStore = getMemoryStore();
+      if (!memoryStore) {
+        // If memory store not available, assume setup needed
+        res.json({ needsSetup: true, facts: {} });
+        return;
+      }
+
+      const setupFact = memoryStore.getFact('skynet_setup_complete');
+      const needsSetup = setupFact?.value !== 'true';
+
+      // Get personalization facts if setup is complete
+      const facts: Record<string, string> = {};
+      if (!needsSetup) {
+        const factKeys = ['user_name', 'assistant_name', 'personality_tone', 'personality_style', 'special_rules'];
+        for (const key of factKeys) {
+          const fact = memoryStore.getFact(key);
+          if (fact) {
+            facts[key] = fact.value;
+          }
+        }
+      }
+
+      res.json({ needsSetup, facts });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get onboarding status' });
+    }
+  });
+
+  // Mark onboarding as complete and persist config
+  router.post('/onboarding/complete', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      await runtimeConfig.persistToFile();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to complete onboarding' });
+    }
+  });
+
+  // Reset onboarding - clear all personalization and start fresh
+  router.delete('/onboarding/reset', async (_req: Request, res: Response) => {
+    try {
+      const memoryStore = getMemoryStore();
+      if (!memoryStore) {
+        res.status(500).json({ error: 'Memory store not available' });
+        return;
+      }
+
+      // Delete all onboarding-related facts
+      const onboardingFacts = [
+        'skynet_setup_complete',
+        'user_name',
+        'assistant_name',
+        'personality_tone',
+        'personality_style',
+        'special_rules',
+      ];
+
+      for (const key of onboardingFacts) {
+        memoryStore.deleteFact(key);
+      }
+
+      // Reset system prompt to default
+      const runtimeConfig = getRuntimeConfig();
+      runtimeConfig.resetSystemPrompt();
+      await runtimeConfig.persistToFile();
+
+      res.json({ success: true, message: 'Assistant reset. Refresh to start onboarding.' });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to reset onboarding' });
+    }
+  });
+
+  // ========================================
+  // Tool Authorizations
+  // ========================================
+
+  // List all saved authorizations
+  router.get('/authorizations', (_req: Request, res: Response) => {
+    try {
+      const { listAuthorizations } = require('../agent/authorization.js');
+      const authorizations = listAuthorizations();
+      res.json({ authorizations });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to list authorizations' });
+    }
+  });
+
+  // Revoke an authorization
+  router.delete('/authorizations/:id', (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { revokeAuthorization } = require('../agent/authorization.js');
+      const success = revokeAuthorization(id);
+      
+      if (success) {
+        res.json({ success: true, message: 'Authorization revoked' });
+      } else {
+        res.status(404).json({ error: 'Authorization not found or could not be revoked' });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to revoke authorization' });
+    }
+  });
+
+  // Clear all authorizations
+  router.delete('/authorizations', (_req: Request, res: Response) => {
+    try {
+      const { clearAllAuthorizations } = require('../agent/authorization.js');
+      const count = clearAllAuthorizations();
+      res.json({ success: true, message: `Cleared ${count} authorizations` });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to clear authorizations' });
+    }
   });
 
   return router;

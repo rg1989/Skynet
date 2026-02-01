@@ -100,6 +100,9 @@ export interface ToolInfo {
   enabled: boolean;
 }
 
+// Authorization scope levels for persistent approvals
+export type AuthorizationScope = 'exact' | 'pattern' | 'tool';
+
 // Tool confirmation request for high-risk output tools
 export interface ToolConfirmationRequest {
   confirmId: string;
@@ -107,6 +110,15 @@ export interface ToolConfirmationRequest {
   toolName: string;
   toolParams: Record<string, unknown>;
   riskReason: string;
+  // Extended fields for authorization
+  commandExplanation?: {
+    summary: string;
+    details: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    warnings: string[];
+  };
+  suggestedScopes?: AuthorizationScope[];
+  canRemember?: boolean;
 }
 
 export type ToolsMode = 'hybrid' | 'native' | 'text' | 'disabled';
@@ -161,6 +173,12 @@ interface AppState {
   // Connection
   connected: boolean;
   setConnected: (connected: boolean) => void;
+
+  // Onboarding
+  needsOnboarding: boolean;
+  setNeedsOnboarding: (needs: boolean) => void;
+  onboardingFacts: Record<string, string>;
+  setOnboardingFacts: (facts: Record<string, string>) => void;
 
   // Sessions
   sessions: SessionInfo[];
@@ -237,6 +255,12 @@ export const useStore = create<AppState>((set) => ({
   // Connection
   connected: false,
   setConnected: (connected) => set({ connected }),
+
+  // Onboarding
+  needsOnboarding: false,
+  setNeedsOnboarding: (needs) => set({ needsOnboarding: needs }),
+  onboardingFacts: {},
+  setOnboardingFacts: (facts) => set({ onboardingFacts: facts }),
 
   // Sessions
   sessions: [],

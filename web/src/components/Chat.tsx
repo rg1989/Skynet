@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { useStore, type Message, type SessionInfo } from '../store';
+import { useStore, type Message, type SessionInfo, type AuthorizationScope } from '../store';
 import { ChatMessage } from './ChatMessage';
 import { ChatHeader } from './ChatHeader';
 import { ControlBar } from './ControlBar';
@@ -248,6 +248,7 @@ export function Chat() {
     voiceSettings,
     setWakeWordStatus,
     setIsTtsSpeaking,
+    needsOnboarding,
   } = useStore();
 
   // WebSocket hook for sending confirmation responses
@@ -618,11 +619,13 @@ export function Chat() {
   );
 
   // Tool confirmation handlers
-  const handleConfirmTool = useCallback(() => {
+  const handleConfirmTool = useCallback((remember: boolean, scope?: AuthorizationScope) => {
     if (pendingConfirmation) {
       sendMessage('confirm_response', {
         confirmId: pendingConfirmation.confirmId,
         approved: true,
+        remember,
+        scope,
       });
       setPendingConfirmation(null);
     }
@@ -633,6 +636,7 @@ export function Chat() {
       sendMessage('confirm_response', {
         confirmId: pendingConfirmation.confirmId,
         approved: false,
+        remember: false,
       });
       setPendingConfirmation(null);
     }
@@ -652,8 +656,8 @@ export function Chat() {
           <div className="max-w-3xl mx-auto">
             {messages.length === 0 && (
               <div className="text-center text-slate-500 mt-16">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-                  <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
                     <line x1="12" y1="8" x2="12" y2="5" strokeWidth={1.5} strokeLinecap="round" />
                     <circle cx="12" cy="4" r="1" fill="currentColor" />
@@ -662,8 +666,29 @@ export function Chat() {
                     <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
                   </svg>
                 </div>
-                <h2 className="text-xl font-medium text-slate-300 mb-2">Welcome to Skynet</h2>
-                <p className="text-slate-500">Send a message to get started</p>
+                
+                {needsOnboarding ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-slate-200 mb-3">
+                      Welcome! Let's set up your assistant.
+                    </h2>
+                    <p className="text-slate-400 mb-6 max-w-md mx-auto">
+                      I'll ask you a few questions to personalize your experience - 
+                      your name, what to call me, and how you'd like me to communicate.
+                    </p>
+                    <button
+                      onClick={() => handleSendMessage("Hi, let's get started!")}
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-medium rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:shadow-emerald-500/40 hover:scale-105"
+                    >
+                      Begin Setup
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-xl font-medium text-slate-300 mb-2">Welcome to Skynet</h2>
+                    <p className="text-slate-500">Send a message to get started</p>
+                  </>
+                )}
               </div>
             )}
             

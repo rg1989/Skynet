@@ -625,6 +625,9 @@ export const setSystemPromptSkill: Skill = {
       }
       
       rc.setSystemPrompt(finalPrompt);
+      
+      // Persist to config file so the prompt survives restarts
+      await rc.persistToFile();
 
       return {
         success: true,
@@ -632,6 +635,7 @@ export const setSystemPromptSkill: Skill = {
           message: append ? 'Appended to system prompt' : 'System prompt updated',
           promptLength: finalPrompt.length,
           takesEffectNextTurn: true,
+          persisted: true,
         },
       };
     } catch (error) {

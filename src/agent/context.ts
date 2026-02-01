@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { getPersona } from './personas.js';
 import { SECURITY_INSTRUCTIONS } from './security.js';
+import { isOnboardingComplete, buildPersonalizationPrefix } from '../onboarding/index.js';
 
 /**
  * Context builder - assembles messages for LLM
@@ -149,6 +150,22 @@ IMPORTANT:
  * Build system prompt
  */
 function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: Skill[], allSkills: Skill[], personaId?: string): string {
+  // Check if onboarding is needed - if so, use the onboarding persona
+  const onboardingNeeded = !isOnboardingComplete();
+  
+  if (onboardingNeeded) {
+    // Use the onboarding persona for first-run setup
+    const onboardingPersona = getPersona('onboarding');
+    const toolKnowledge = generateToolKnowledge(allSkills, enabledSkills);
+    const toolInstructions = (toolsMode === 'text' || toolsMode === 'hybrid')
+      ? generateToolInstructions(enabledSkills)
+      : '';
+    return onboardingPersona.systemPrompt + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
+  }
+  
+  // Get personalization prefix from onboarding facts
+  const personalizationPrefix = buildPersonalizationPrefix();
+  
   // Check for persona-specific prompt
   const persona = personaId ? getPersona(personaId) : null;
   const personaPrompt = persona?.systemPrompt;
@@ -156,10 +173,11 @@ function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: 
   // If tools are disabled, use a simpler prompt without tool mentions
   if (toolsMode === 'disabled') {
     // Use persona prompt if available, otherwise default
-    return personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
+    const basePrompt = personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
 
 Be helpful, accurate, and conversational. Answer questions directly and naturally.
 Do not attempt to use tools, functions, or output JSON - just respond in plain text.`;
+    return personalizationPrefix + basePrompt;
   }
 
   // Use persona prompt as base if available
@@ -198,7 +216,8 @@ After completing a task, summarize what was done.`;
     : '';
 
   // Append security instructions to help defend against prompt injection
-  return basePrompt + memorySection + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
+  // Prepend personalization from onboarding facts
+  return personalizationPrefix + basePrompt + memorySection + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
 }
 
 /**

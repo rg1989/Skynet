@@ -1,16 +1,30 @@
-import { useEffect, useRef } from 'react';
-import type { ToolConfirmationRequest } from '../store';
+import { useEffect, useRef, useState } from 'react';
+import type { ToolConfirmationRequest, AuthorizationScope } from '../store';
 
 interface SecurityConfirmModalProps {
   isOpen: boolean;
   confirmation: ToolConfirmationRequest;
-  onConfirm: () => void;
+  onConfirm: (remember: boolean, scope?: AuthorizationScope) => void;
   onCancel: () => void;
 }
 
+// Scope labels for the dropdown
+const SCOPE_LABELS: Record<AuthorizationScope, string> = {
+  exact: 'This exact action only',
+  pattern: 'Similar actions (same command type)',
+  tool: 'All actions of this type',
+};
+
+// Risk level colors
+const RISK_COLORS = {
+  low: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+  medium: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+  high: 'text-red-400 bg-red-500/10 border-red-500/30',
+};
+
 /**
  * Security confirmation modal for high-risk tool execution
- * Features prominent warning styling to alert users to potentially dangerous actions
+ * Features prominent warning styling and remember option for authorizations
  */
 export function SecurityConfirmModal({
   isOpen,
@@ -19,6 +33,16 @@ export function SecurityConfirmModal({
   onCancel,
 }: SecurityConfirmModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
+  const [remember, setRemember] = useState(false);
+  const [selectedScope, setSelectedScope] = useState<AuthorizationScope>('exact');
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setRemember(false);
+      setSelectedScope(confirmation.suggestedScopes?.[0] || 'exact');
+    }
+  }, [isOpen, confirmation.suggestedScopes]);
 
   // Handle escape key
   useEffect(() => {
@@ -40,6 +64,10 @@ export function SecurityConfirmModal({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleConfirm = () => {
+    onConfirm(remember, remember ? selectedScope : undefined);
+  };
 
   // Extract command or action details from the tool params
   const getActionDetails = () => {
@@ -92,6 +120,8 @@ export function SecurityConfirmModal({
   };
 
   const details = getActionDetails();
+  const explanation = confirmation.commandExplanation;
+  const suggestedScopes = confirmation.suggestedScopes || ['exact', 'tool'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -122,18 +152,7 @@ export function SecurityConfirmModal({
         </div>
 
         {/* Content */}
-        <div className="px-6 py-5">
-          {/* Risk warning */}
-          <div className="flex items-start gap-3 mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <svg className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-            </svg>
-            <p className="text-red-300 text-sm">
-              The AI agent is requesting to perform a <span className="font-semibold text-red-400">potentially risky action</span>. 
-              This action could modify files, execute code, or send data externally.
-            </p>
-          </div>
-
+        <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
           {/* Action type */}
           <div className="mb-4">
             <div className="text-slate-400 text-xs uppercase tracking-wide mb-2 font-medium">
@@ -145,10 +164,44 @@ export function SecurityConfirmModal({
             </div>
           </div>
 
+          {/* Command Explanation (if available) */}
+          {explanation && (
+            <div className="mb-4">
+              <div className="text-slate-400 text-xs uppercase tracking-wide mb-2 font-medium">
+                What This Does
+              </div>
+              <div className={`p-3 rounded-lg border ${RISK_COLORS[explanation.riskLevel]}`}>
+                <div className="flex items-start gap-2">
+                  <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div>
+                    <p className="font-medium">{explanation.summary}</p>
+                    <p className="text-sm opacity-80 mt-1">{explanation.details}</p>
+                  </div>
+                </div>
+                
+                {/* Warnings */}
+                {explanation.warnings.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-current/20 space-y-1">
+                    {explanation.warnings.map((warning, i) => (
+                      <div key={i} className="flex items-start gap-2 text-sm">
+                        <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span>{warning}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Command/Details */}
-          <div className="mb-6">
+          <div className="mb-4">
             <div className="text-slate-400 text-xs uppercase tracking-wide mb-2 font-medium">
-              Details
+              Command
             </div>
             <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 font-mono text-sm">
               <code className="text-amber-300 whitespace-pre-wrap break-all">
@@ -156,6 +209,44 @@ export function SecurityConfirmModal({
               </code>
             </div>
           </div>
+
+          {/* Remember Authorization */}
+          {confirmation.canRemember && (
+            <div className="mb-4 p-4 bg-slate-800/50 border border-slate-700 rounded-lg">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="mt-1 w-4 h-4 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                />
+                <div>
+                  <span className="font-medium text-white">Remember this authorization</span>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Don't ask again for similar actions. You can revoke this later in Settings.
+                  </p>
+                </div>
+              </label>
+
+              {/* Scope selector (shown when remember is checked) */}
+              {remember && (
+                <div className="mt-3 pl-7">
+                  <label className="block text-sm text-slate-400 mb-2">Authorization scope:</label>
+                  <select
+                    value={selectedScope}
+                    onChange={(e) => setSelectedScope(e.target.value as AuthorizationScope)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                  >
+                    {suggestedScopes.map((scope) => (
+                      <option key={scope} value={scope}>
+                        {SCOPE_LABELS[scope]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex gap-3">
@@ -169,13 +260,13 @@ export function SecurityConfirmModal({
               Deny
             </button>
             <button
-              onClick={onConfirm}
+              onClick={handleConfirm}
               className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 text-white"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              Allow Execution
+              {remember ? 'Allow & Remember' : 'Allow Once'}
             </button>
           </div>
 
