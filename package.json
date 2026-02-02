@@ -8,11 +8,11 @@
     "dev": "concurrently -k -n backend,frontend -c blue,green \"PORT=3001 tsx watch src/index.ts\" \"npm run dev --prefix web\"",
     "dev:backend": "PORT=3001 tsx watch src/index.ts",
     "dev:frontend": "npm run dev --prefix web",
-    "build": "npm run build --prefix web && tsc",
-    "build:backend": "tsc",
+    "build": "npm run build --prefix web && npx tsc",
+    "build:backend": "npx tsc",
     "build:frontend": "npm run build --prefix web",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "npx tsc --noEmit"
   },
   "engines": {
     "node": ">=20.0.0"
