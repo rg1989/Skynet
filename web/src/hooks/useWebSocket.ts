@@ -147,6 +147,26 @@ export function useWebSocket() {
         case 'agent:tool_end':
           if (currentRunId && p.runId === currentRunId) {
             removeActiveTool(p.name as string);
+            
+            // Capture media from tool result
+            const toolMedia = p.media as {
+              type: 'image' | 'audio' | 'video' | 'document';
+              path: string;
+              mimeType?: string;
+            } | undefined;
+            
+            if (toolMedia && toolMedia.path) {
+              // Convert file path to server URL
+              const filename = toolMedia.path.split('/').pop();
+              const mediaUrl = `/api/media/${filename}`;
+              
+              useStore.getState().addPendingMedia({
+                type: toolMedia.type,
+                url: mediaUrl,
+                mimeType: toolMedia.mimeType,
+                caption: `Tool: ${p.name}`,
+              });
+            }
           }
           break;
 
@@ -247,7 +267,7 @@ export function useWebSocket() {
         }, 3000);
       };
 
-      ws.onerror = (error) => {
+      ws.onerror = (error: Event) => {
         console.error('WebSocket error:', error);
         globalWsConnecting = false;
       };

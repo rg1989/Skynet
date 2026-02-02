@@ -129,7 +129,7 @@ export const listFactsSkill: Skill = {
         success: true,
         data: {
           count: facts.length,
-          facts: facts.map(f => ({ key: f.key, value: f.value })),
+          facts: facts.map((f: { key: string; value: string }) => ({ key: f.key, value: f.value })),
         },
       };
     } catch (error) {
@@ -166,7 +166,7 @@ export const rememberSkill: Skill = {
     const { content, tags } = params as { content: string; tags?: string };
     
     try {
-      const metadata = tags ? { tags: tags.split(',').map(t => t.trim()) } : undefined;
+      const metadata = tags ? { tags: tags.split(',').map((t: string) => t.trim()) } : undefined;
       const id = await memoryStore.remember(content, metadata);
       
       return {
@@ -214,7 +214,7 @@ export const searchMemorySkill: Skill = {
         data: {
           query,
           count: results.length,
-          results: results.map(r => ({
+          results: results.map((r: { memory: { content: string; id: string }; score: number }) => ({
             content: r.memory.content,
             score: Math.round(r.score * 100) / 100,
             id: r.memory.id,

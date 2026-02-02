@@ -59,6 +59,14 @@ function saveVoiceSettings(settings: VoiceSettings): void {
   }
 }
 
+// Media attachment for messages
+export interface MessageMedia {
+  type: 'image' | 'audio' | 'video' | 'document';
+  url: string; // URL to fetch the media from server
+  mimeType?: string;
+  caption?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -68,13 +76,22 @@ export interface Message {
   toolCalls?: { name: string; status: 'running' | 'done'; result?: string }[];
   /** Thought process / steps the AI took while generating this response */
   thoughtProcess?: string;
+  /** Media attachments (images, audio, etc.) */
+  media?: MessageMedia[];
 }
+
+// Session source types for grouping
+export type SessionSource = 'telegram' | 'whatsapp' | 'web' | 'other';
 
 export interface SessionInfo {
   key: string;
   messageCount: number;
   lastActivity: number;
   createdAt: number;
+  /** Source type inferred from session key pattern */
+  source: SessionSource;
+  /** Human-readable title for the session */
+  title?: string;
 }
 
 export interface ScheduledTask {
@@ -215,6 +232,12 @@ interface AppState {
   removeActiveTool: (name: string) => void;
   clearActiveTools: () => void;
 
+  // Pending media from tool results (collected during agent run)
+  pendingMedia: MessageMedia[];
+  addPendingMedia: (media: MessageMedia) => void;
+  clearPendingMedia: () => void;
+  consumePendingMedia: () => MessageMedia[];
+
   // Scheduled tasks
   tasks: ScheduledTask[];
   setTasks: (tasks: ScheduledTask[]) => void;
@@ -251,7 +274,7 @@ interface AppState {
   setIsTtsSpeaking: (speaking: boolean) => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   // Connection
   connected: false,
   setConnected: (connected) => set({ connected }),
@@ -270,19 +293,19 @@ export const useStore = create<AppState>((set) => ({
     saveSessionKey(key);
     set({ currentSessionKey: key, messages: [] });
   },
-  removeSession: (key) =>
-    set((state) => ({
-      sessions: state.sessions.filter((s) => s.key !== key),
+  removeSession: (key: string) =>
+    set((state: AppState) => ({
+      sessions: state.sessions.filter((s: SessionInfo) => s.key !== key),
     })),
 
   // Messages
   messages: [],
   setMessages: (messages) => set({ messages }),
-  addMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
-  updateMessage: (id, updates) =>
-    set((state) => ({
-      messages: state.messages.map((m) =>
+  addMessage: (message: Message) =>
+    set((state: AppState) => ({ messages: [...state.messages, message] })),
+  updateMessage: (id: string, updates: Partial<Message>) =>
+    set((state: AppState) => ({
+      messages: state.messages.map((m: Message) =>
         m.id === id ? { ...m, ...updates } : m
       ),
     })),
@@ -295,8 +318,8 @@ export const useStore = create<AppState>((set) => ({
   setIsThinking: (thinking) => set({ isThinking: thinking }),
   thinkingContent: '',
   setThinkingContent: (content) => set({ thinkingContent: content }),
-  appendThinkingContent: (delta) =>
-    set((state) => ({ thinkingContent: state.thinkingContent + delta })),
+  appendThinkingContent: (delta: string) =>
+    set((state: AppState) => ({ thinkingContent: state.thinkingContent + delta })),
 
   // Voice input
   isListening: false,
@@ -306,24 +329,35 @@ export const useStore = create<AppState>((set) => ({
 
   // Tool execution
   activeTools: [],
-  addActiveTool: (name, params) =>
-    set((state) => ({ activeTools: [...state.activeTools, { name, params }] })),
-  removeActiveTool: (name) =>
-    set((state) => ({
-      activeTools: state.activeTools.filter((t) => t.name !== name),
+  addActiveTool: (name: string, params?: unknown) =>
+    set((state: AppState) => ({ activeTools: [...state.activeTools, { name, params }] })),
+  removeActiveTool: (name: string) =>
+    set((state: AppState) => ({
+      activeTools: state.activeTools.filter((t: { name: string; params?: unknown }) => t.name !== name),
     })),
   clearActiveTools: () => set({ activeTools: [] }),
+
+  // Pending media from tool results
+  pendingMedia: [],
+  addPendingMedia: (media: MessageMedia) =>
+    set((state: AppState) => ({ pendingMedia: [...state.pendingMedia, media] })),
+  clearPendingMedia: () => set({ pendingMedia: [] }),
+  consumePendingMedia: () => {
+    const media = get().pendingMedia;
+    set({ pendingMedia: [] });
+    return media;
+  },
 
   // Scheduled tasks
   tasks: [],
   setTasks: (tasks) => set({ tasks }),
-  addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
-  updateTask: (id, updates) =>
-    set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+  addTask: (task: ScheduledTask) => set((state: AppState) => ({ tasks: [...state.tasks, task] })),
+  updateTask: (id: string, updates: Partial<ScheduledTask>) =>
+    set((state: AppState) => ({
+      tasks: state.tasks.map((t: ScheduledTask) => (t.id === id ? { ...t, ...updates } : t)),
     })),
-  removeTask: (id) =>
-    set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+  removeTask: (id: string) =>
+    set((state: AppState) => ({ tasks: state.tasks.filter((t: ScheduledTask) => t.id !== id) })),
 
   // Settings - default to empty, will be populated from API
   settings: {
@@ -338,8 +372,8 @@ export const useStore = create<AppState>((set) => ({
     loading: true, // Start as loading until API responds
     warmingUp: false,
   },
-  setSettings: (updates) =>
-    set((state) => ({
+  setSettings: (updates: Partial<Settings>) =>
+    set((state: AppState) => ({
       settings: { ...state.settings, ...updates },
     })),
 
@@ -353,21 +387,21 @@ export const useStore = create<AppState>((set) => ({
 
   // Toast notifications
   toasts: [],
-  addToast: (toast) =>
-    set((state) => ({
+  addToast: (toast: ToastMessage) =>
+    set((state: AppState) => ({
       // Limit to 5 toasts max, remove oldest if needed
       toasts: [...state.toasts, toast].slice(-5),
     })),
-  removeToast: (id) =>
-    set((state) => ({
-      toasts: state.toasts.filter((t) => t.id !== id),
+  removeToast: (id: string) =>
+    set((state: AppState) => ({
+      toasts: state.toasts.filter((t: ToastMessage) => t.id !== id),
     })),
   clearAllToasts: () => set({ toasts: [] }),
 
   // Voice settings and state - load from localStorage
   voiceSettings: getInitialVoiceSettings(),
-  setVoiceSettings: (updates) =>
-    set((state) => {
+  setVoiceSettings: (updates: Partial<VoiceSettings>) =>
+    set((state: AppState) => {
       const newSettings = { ...state.voiceSettings, ...updates };
       saveVoiceSettings(newSettings);
       return { voiceSettings: newSettings };

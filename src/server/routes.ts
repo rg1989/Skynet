@@ -19,11 +19,51 @@ interface SessionMessage {
   timestamp: number;
 }
 
+// Session source types for grouping
+type SessionSource = 'telegram' | 'whatsapp' | 'web' | 'other';
+
 interface SessionInfo {
   key: string;
   messageCount: number;
   lastActivity: number;
   createdAt: number;
+  source: SessionSource;
+  title?: string;
+}
+
+/**
+ * Infer session source and title from the session key
+ */
+function parseSessionKey(key: string): { source: SessionSource; title: string } {
+  // Telegram sessions: telegram:dm:{userId} or telegram:group:{chatId}
+  if (key.startsWith('telegram_dm_') || key.startsWith('telegram:dm:')) {
+    const userId = key.replace(/telegram[_:]dm[_:]/, '');
+    return { source: 'telegram', title: `DM ${userId}` };
+  }
+  if (key.startsWith('telegram_group_') || key.startsWith('telegram:group:')) {
+    const chatId = key.replace(/telegram[_:]group[_:]/, '');
+    return { source: 'telegram', title: `Group ${chatId}` };
+  }
+  
+  // WhatsApp sessions (for future support)
+  if (key.startsWith('whatsapp_') || key.startsWith('whatsapp:')) {
+    const chatId = key.replace(/whatsapp[_:]/, '');
+    return { source: 'whatsapp', title: `WhatsApp ${chatId}` };
+  }
+  
+  // Web sessions
+  if (key.startsWith('chat-')) {
+    const timestamp = key.replace('chat-', '');
+    const date = new Date(parseInt(timestamp));
+    const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return { source: 'web', title: `Chat ${timeStr}` };
+  }
+  if (key === 'web-default') {
+    return { source: 'web', title: 'Default Chat' };
+  }
+  
+  // Other/unknown sources
+  return { source: 'other', title: key };
 }
 
 async function listSessions(): Promise<SessionInfo[]> {
@@ -31,7 +71,7 @@ async function listSessions(): Promise<SessionInfo[]> {
     const files = await readdir(SESSIONS_DIR);
     const sessions: SessionInfo[] = [];
     
-    for (const file of files) {
+    for (const file of files as string[]) {
       if (!file.endsWith('.jsonl')) continue;
       
       const key = file.replace('.jsonl', '');
@@ -39,17 +79,21 @@ async function listSessions(): Promise<SessionInfo[]> {
       
       try {
         const content = await readFile(filePath, 'utf-8');
-        const lines = content.trim().split('\n').filter(l => l.trim());
-        const messages = lines.map(l => JSON.parse(l) as SessionMessage);
+        const lines = content.trim().split('\n').filter((l: string) => l.trim());
+        const messages = lines.map((l: string) => JSON.parse(l) as SessionMessage);
         
         const fileStat = await stat(filePath);
-        const timestamps = messages.map(m => m.timestamp).filter(t => t);
+        const timestamps = messages.map((m: SessionMessage) => m.timestamp).filter((t: number) => t);
+        
+        const { source, title } = parseSessionKey(key);
         
         sessions.push({
           key,
           messageCount: messages.length,
           lastActivity: timestamps.length > 0 ? Math.max(...timestamps) : fileStat.mtimeMs,
           createdAt: timestamps.length > 0 ? Math.min(...timestamps) : fileStat.birthtimeMs,
+          source,
+          title,
         });
       } catch {
         // Skip malformed files
@@ -57,7 +101,7 @@ async function listSessions(): Promise<SessionInfo[]> {
     }
     
     // Sort by last activity, most recent first
-    return sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+    return sessions.sort((a: SessionInfo, b: SessionInfo) => b.lastActivity - a.lastActivity);
   } catch {
     return [];
   }
@@ -68,8 +112,8 @@ async function readSession(key: string): Promise<SessionMessage[]> {
   
   try {
     const content = await readFile(filePath, 'utf-8');
-    const lines = content.trim().split('\n').filter(l => l.trim());
-    return lines.map(l => JSON.parse(l) as SessionMessage);
+    const lines = content.trim().split('\n').filter((l: string) => l.trim());
+    return lines.map((l: string) => JSON.parse(l) as SessionMessage);
   } catch {
     return [];
   }
@@ -369,7 +413,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const currentProvider = runtimeConfig.getCurrentProvider();
       
       const providers = await Promise.all(
-        available.map(async (name) => {
+        available.map(async (name: string) => {
           const isAvailable = await providerManager?.checkAvailability(name) ?? false;
           const model = runtimeConfig.getCurrentModel(name);
           return {
@@ -403,7 +447,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
         }
         
         const data = await response.json() as { models: Array<{ name: string; size: number; modified_at: string }> };
-        const models = data.models.map(m => ({
+        const models = data.models.map((m: { name: string; size: number; modified_at: string }) => ({
           name: m.name,
           size: m.size,
           modified: m.modified_at,
@@ -603,7 +647,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const disabledTools = runtimeConfig.getDisabledTools();
       const toolsMode = runtimeConfig.getToolsMode();
       
-      const tools = skills.map(skill => ({
+      const tools = skills.map((skill: { name: string; description: string; parameters?: Record<string, unknown> }) => ({
         name: skill.name,
         description: skill.description,
         enabled: !disabledTools.includes(skill.name),
@@ -626,7 +670,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       // Check if tool exists
-      const tool = skills.find(s => s.name === name);
+      const tool = skills.find((s: { name: string }) => s.name === name);
       if (!tool) {
         res.status(404).json({ error: `Tool not found: ${name}` });
         return;
@@ -657,7 +701,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       let disabledCount = 0;
-      for (const skill of skills) {
+      for (const skill of skills as Array<{ name: string }>) {
         if (!OLLAMA_META_TOOLS.includes(skill.name)) {
           runtimeConfig.disableTool(skill.name);
           disabledCount++;
@@ -665,7 +709,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       }
       
       // Ensure meta-tools are enabled
-      for (const name of OLLAMA_META_TOOLS) {
+      for (const name of OLLAMA_META_TOOLS as string[]) {
         runtimeConfig.enableTool(name);
       }
       
@@ -692,13 +736,13 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
     try {
       const runtimeConfig = getRuntimeConfig();
       const skills = agentRunner?.getSkills() || [];
-      const validToolNames = skills.map(s => s.name);
+      const validToolNames = skills.map((s: { name: string }) => s.name);
       
       let enabledCount = 0;
       const enabled: string[] = [];
       const notFound: string[] = [];
       
-      for (const name of tools) {
+      for (const name of tools as string[]) {
         if (validToolNames.includes(name)) {
           runtimeConfig.enableTool(name);
           enabled.push(name);
@@ -726,7 +770,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       let enabledCount = 0;
-      for (const skill of skills) {
+      for (const skill of skills as Array<{ name: string }>) {
         runtimeConfig.enableTool(skill.name);
         enabledCount++;
       }
@@ -748,7 +792,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       let disabledCount = 0;
-      for (const skill of skills) {
+      for (const skill of skills as Array<{ name: string }>) {
         runtimeConfig.disableTool(skill.name);
         disabledCount++;
       }
@@ -1022,7 +1066,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const facts: Record<string, string> = {};
       if (!needsSetup) {
         const factKeys = ['user_name', 'assistant_name', 'personality_tone', 'personality_style', 'special_rules'];
-        for (const key of factKeys) {
+        for (const key of factKeys as string[]) {
           const fact = memoryStore.getFact(key);
           if (fact) {
             facts[key] = fact.value;
@@ -1066,7 +1110,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
         'special_rules',
       ];
 
-      for (const key of onboardingFacts) {
+      for (const key of onboardingFacts as string[]) {
         memoryStore.deleteFact(key);
       }
 

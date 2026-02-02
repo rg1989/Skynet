@@ -42,7 +42,7 @@ export class SessionManager {
 
     const content = readFileSync(path, 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
-    const messages: SessionMessage[] = lines.map(line => JSON.parse(line));
+    const messages: SessionMessage[] = lines.map((line: string) => JSON.parse(line));
 
     return {
       key: sessionKey,
@@ -67,7 +67,7 @@ export class SessionManager {
 
     // Write all messages (JSONL format)
     const content = session.messages
-      .map(m => JSON.stringify(m))
+      .map((m: SessionMessage) => JSON.stringify(m))
       .join('\n') + '\n';
     
     writeFileSync(path, content, 'utf-8');

@@ -252,7 +252,8 @@ export function Settings() {
     try {
       const response = await fetch('/api/voice/voices');
       const data = await response.json();
-      const voiceList = Object.entries(data.voices || {}).map(([id, name]) => ({ 
+      const voices = (data.voices || {}) as Record<string, string>;
+      const voiceList = Object.entries(voices).map(([id, name]) => ({ 
         id, 
         name: name as string 
       }));
@@ -266,7 +267,8 @@ export function Settings() {
     try {
       const response = await fetch('/api/voice/wakeword/models');
       const data = await response.json();
-      const modelList = Object.entries(data.models || {}).map(([id, name]) => ({ 
+      const models = (data.models || {}) as Record<string, string>;
+      const modelList = Object.entries(models).map(([id, name]) => ({ 
         id, 
         name: name as string 
       }));
@@ -335,7 +337,7 @@ export function Settings() {
     await performProviderSwitch(provider);
   };
 
-  const performProviderSwitch = async (provider: string, disableAllTools = false) => {
+  const performProviderSwitch = async (provider: string, disableAllTools: boolean = false) => {
     try {
       const response = await fetch('/api/config/provider', {
         method: 'PUT',
@@ -429,7 +431,7 @@ export function Settings() {
   const handleModelChange = async (model: string) => {
     try {
       // Find the full model info to check size
-      const modelInfo = settings.availableModels.find(m => m.name === model);
+      const modelInfo = settings.availableModels.find((m: { name: string; description?: string; size?: number }) => m.name === model);
       
       const response = await fetch('/api/config/provider', {
         method: 'PUT',
@@ -708,7 +710,7 @@ export function Settings() {
                   <label className="block text-sm text-slate-400 mb-2">Provider</label>
                   <select
                     value={settings.currentProvider}
-                    onChange={(e) => handleProviderChange(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProviderChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
                   >
                     {settings.providers.map((p) => (
@@ -724,7 +726,7 @@ export function Settings() {
                   <label className="block text-sm text-slate-400 mb-2">Model</label>
                   <select
                     value={settings.currentModel}
-                    onChange={(e) => handleModelChange(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleModelChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
                   >
                     {settings.availableModels.map((m) => (
@@ -757,7 +759,7 @@ export function Settings() {
                   <input
                     type="password"
                     value={openaiKey}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       setOpenaiKey(e.target.value);
                       setKeysDirty(true);
                     }}
@@ -775,7 +777,7 @@ export function Settings() {
                   <input
                     type="password"
                     value={anthropicKey}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       setAnthropicKey(e.target.value);
                       setKeysDirty(true);
                     }}
@@ -818,7 +820,7 @@ export function Settings() {
 
               <textarea
                 value={systemPrompt}
-                onChange={(e) => {
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                   setSystemPrompt(e.target.value);
                   setPromptDirty(e.target.value !== settings.systemPrompt);
                 }}
@@ -893,8 +895,8 @@ export function Settings() {
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={settings.tools.length > 0 && settings.tools.every(t => t.enabled)}
-                        onChange={(e) => handleToggleAllTools(e.target.checked)}
+                        checked={settings.tools.length > 0 && settings.tools.every((t: { name: string; enabled: boolean }) => t.enabled)}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleToggleAllTools(e.target.checked)}
                         className="sr-only peer"
                       />
                       <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
@@ -933,7 +935,7 @@ export function Settings() {
                           <input
                             type="checkbox"
                             checked={tool.enabled}
-                            onChange={(e) => handleToolToggle(tool.name, e.target.checked)}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleToolToggle(tool.name, e.target.checked)}
                             className="sr-only peer"
                           />
                           <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
@@ -1077,7 +1079,7 @@ export function Settings() {
                       <input
                         type="checkbox"
                         checked={voiceSettings.ttsEnabled}
-                        onChange={(e) => {
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           handleVoiceSettingChange({ ttsEnabled: e.target.checked });
                           showToast('success', e.target.checked ? 'TTS enabled' : 'TTS disabled');
                         }}
@@ -1093,7 +1095,7 @@ export function Settings() {
                     <label className="block text-sm text-slate-400 mb-2">Voice</label>
                     <select
                       value={voiceSettings.ttsVoice}
-                      onChange={(e) => {
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                         handleVoiceSettingChange({ ttsVoice: e.target.value });
                         showToast('success', 'Voice changed');
                       }}
@@ -1119,7 +1121,7 @@ export function Settings() {
                       max="2.0"
                       step="0.1"
                       value={voiceSettings.ttsSpeed}
-                      onChange={(e) => handleVoiceSettingChange({ ttsSpeed: parseFloat(e.target.value) })}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ ttsSpeed: parseFloat(e.target.value) })}
                       disabled={!voiceServiceAvailable || !voiceSettings.ttsEnabled}
                       className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-500 disabled:opacity-50"
                     />
@@ -1150,7 +1152,7 @@ export function Settings() {
                       <input
                         type="checkbox"
                         checked={voiceSettings.wakeWordEnabled}
-                        onChange={(e) => {
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           handleVoiceSettingChange({ wakeWordEnabled: e.target.checked });
                           showToast('success', e.target.checked ? 'Wake word enabled' : 'Wake word disabled');
                         }}
@@ -1166,7 +1168,7 @@ export function Settings() {
                     <label className="block text-sm text-slate-400 mb-2">Wake Word</label>
                     <select
                       value={voiceSettings.wakeWordModel}
-                      onChange={(e) => {
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
                         handleVoiceSettingChange({ wakeWordModel: e.target.value });
                         showToast('success', 'Wake word changed');
                       }}
@@ -1192,7 +1194,7 @@ export function Settings() {
                       max="0.8"
                       step="0.05"
                       value={voiceSettings.wakeWordThreshold}
-                      onChange={(e) => handleVoiceSettingChange({ wakeWordThreshold: parseFloat(e.target.value) })}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ wakeWordThreshold: parseFloat(e.target.value) })}
                       disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
                       className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
                     />
@@ -1213,7 +1215,7 @@ export function Settings() {
                       max="30"
                       step="1"
                       value={voiceSettings.wakeWordTimeoutSeconds}
-                      onChange={(e) => handleVoiceSettingChange({ wakeWordTimeoutSeconds: parseInt(e.target.value) })}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ wakeWordTimeoutSeconds: parseInt(e.target.value, 10) })}
                       disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
                       className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
                     />

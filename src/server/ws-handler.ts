@@ -1,5 +1,5 @@
-import { WebSocket, WebSocketServer } from 'ws';
-import type { Server } from 'http';
+import { WebSocket, WebSocketServer, type RawData } from 'ws';
+import type { Server, IncomingMessage } from 'http';
 import type { WSEvent, WSEventType, ToolConfirmationResponse } from '../types/index.js';
 import type { AgentRunner } from '../agent/runner.js';
 import type { VoiceServiceManager } from '../voice/manager.js';
@@ -48,7 +48,7 @@ export class WSHandler {
   }
 
   private setupHandlers(): void {
-    this.wss.on('connection', (ws, _req) => {
+    this.wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
       const clientId = `client_${++this.clientIdCounter}`;
       const client: ConnectedClient = {
         id: clientId,
@@ -89,7 +89,7 @@ export class WSHandler {
         }
       }, 30000);
 
-      ws.on('message', (data, isBinary) => {
+      ws.on('message', (data: RawData, isBinary: boolean) => {
         if (isBinary) {
           // Binary audio data for wake word detection
           this.handleAudioData(clientId, data as Buffer);
@@ -106,7 +106,7 @@ export class WSHandler {
         console.log(`WebSocket client disconnected: ${clientId} (total: ${this.clients.size})`);
       });
 
-      ws.on('error', (error) => {
+      ws.on('error', (error: Error) => {
         console.error(`WebSocket error for ${clientId}:`, error);
         if (client.pingInterval) {
           clearInterval(client.pingInterval);

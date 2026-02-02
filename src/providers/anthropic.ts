@@ -29,14 +29,14 @@ export class AnthropicProvider implements LLMProvider {
     const tools = params.tools?.map(skillToAnthropicTool);
     
     // Extract system message
-    const systemMessage = params.messages.find(m => m.role === 'system')?.content;
-    const otherMessages = params.messages.filter(m => m.role !== 'system');
+    const systemMessage = params.messages.find((m: ChatParams['messages'][0]) => m.role === 'system')?.content;
+    const otherMessages = params.messages.filter((m: ChatParams['messages'][0]) => m.role !== 'system');
 
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: params.maxTokens || 4096,
       system: systemMessage,
-      messages: otherMessages.map(m => {
+      messages: otherMessages.map((m: ChatParams['messages'][0]) => {
         // Handle tool results (sent as user messages with tool_result content)
         if (m.role === 'tool') {
           return {
@@ -82,7 +82,7 @@ export class AnthropicProvider implements LLMProvider {
     let content: string | undefined;
     const toolCalls: ChatResponse['toolCalls'] = [];
 
-    for (const block of response.content) {
+    for (const block of response.content as Array<Anthropic.ContentBlock>) {
       if (block.type === 'text') {
         content = block.text;
       } else if (block.type === 'tool_use') {
@@ -111,14 +111,14 @@ export class AnthropicProvider implements LLMProvider {
     const tools = params.tools?.map(skillToAnthropicTool);
     
     // Extract system message
-    const systemMessage = params.messages.find(m => m.role === 'system')?.content;
-    const otherMessages = params.messages.filter(m => m.role !== 'system');
+    const systemMessage = params.messages.find((m: ChatParams['messages'][0]) => m.role === 'system')?.content;
+    const otherMessages = params.messages.filter((m: ChatParams['messages'][0]) => m.role !== 'system');
 
     const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: params.maxTokens || 4096,
       system: systemMessage,
-      messages: otherMessages.map(m => {
+      messages: otherMessages.map((m: ChatParams['messages'][0]) => {
         // Handle tool results (sent as user messages with tool_result content)
         if (m.role === 'tool') {
           return {
@@ -163,7 +163,7 @@ export class AnthropicProvider implements LLMProvider {
     const toolCalls: { id: string; name: string; arguments: Record<string, unknown> }[] = [];
     let currentToolUse: { id: string; name: string; input: string } | null = null;
 
-    for await (const event of stream) {
+    for await (const event of stream as AsyncIterable<Anthropic.MessageStreamEvent>) {
       if (event.type === 'content_block_start') {
         if (event.content_block.type === 'tool_use') {
           currentToolUse = {

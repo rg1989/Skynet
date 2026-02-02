@@ -501,7 +501,10 @@ export function Chat() {
           clearActiveTools();
           setIsStreamingClosing(false);
           
-          // Now add the final message with captured thought process
+          // Consume any pending media from tool results
+          const collectedMedia = useStore.getState().consumePendingMedia();
+          
+          // Now add the final message with captured thought process and media
           addMessage({
             id: `msg_${Date.now()}`,
             role: 'assistant',
@@ -510,6 +513,8 @@ export function Chat() {
             // Always include thought process if we captured any streaming content
             // This preserves the step-by-step work the AI did
             thoughtProcess: capturedThoughtProcess?.trim() || undefined,
+            // Attach any media collected during tool execution
+            media: collectedMedia.length > 0 ? collectedMedia : undefined,
           });
           
           // Refresh sessions list to update message counts
@@ -528,6 +533,7 @@ export function Chat() {
         setThinkingContent('');
         setActiveRunId(null);
         clearActiveTools();
+        useStore.getState().clearPendingMedia();
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -537,6 +543,7 @@ export function Chat() {
       setThinkingContent('');
       setActiveRunId(null);
       clearActiveTools();
+      useStore.getState().clearPendingMedia();
       addMessage({
         id: `msg_${Date.now()}`,
         role: 'system',

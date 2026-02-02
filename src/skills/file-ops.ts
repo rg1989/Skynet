@@ -59,7 +59,7 @@ export const readFileSkill: Skill = {
       
       // Add line numbers
       const lineNumberStart = startLine + 1;
-      const numberedLines = lines.map((line, i) => 
+      const numberedLines = lines.map((line: string, i: number) => 
         `${String(lineNumberStart + i).padStart(6)}|${line}`
       );
       
@@ -217,7 +217,7 @@ export const listDirectorySkill: Skill = {
       }
       
       const entries = readdirSync(fullPath);
-      const items = entries.map(name => {
+      const items = entries.map((name: string) => {
         const itemPath = join(fullPath, name);
         try {
           const stat = statSync(itemPath);

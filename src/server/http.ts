@@ -30,7 +30,7 @@ export function createAppServer(config: Config): ServerInstance {
   app.use(express.urlencoded({ extended: true }));
 
   // CORS for development
-  app.use((_req, res, next) => {
+  app.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -77,6 +77,17 @@ export function createAppServer(config: Config): ServerInstance {
       });
     }
   });
+
+  // Serve media files from data/media (for images, audio, etc.)
+  const mediaPath = join(process.cwd(), 'data', 'media');
+  app.use('/api/media', express.static(mediaPath, {
+    // Set proper cache headers for media
+    maxAge: '1h',
+    // Set CORS headers for media files
+    setHeaders: (res) => {
+      res.set('Access-Control-Allow-Origin', '*');
+    }
+  }));
 
   // Serve static files for web UI (when built)
   const webDistPath = join(__dirname, '../../web/dist');

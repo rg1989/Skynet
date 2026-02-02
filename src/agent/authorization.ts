@@ -229,7 +229,7 @@ export function listAuthorizations(): Authorization[] {
   const allFacts = store.listFacts();
   const authorizations: Authorization[] = [];
 
-  for (const fact of allFacts) {
+  for (const fact of allFacts as Array<{ key: string; value: string }>) {
     if (fact.key.startsWith(AUTH_PREFIX)) {
       try {
         const auth = JSON.parse(fact.value) as Authorization;
@@ -241,7 +241,7 @@ export function listAuthorizations(): Authorization[] {
   }
 
   // Sort by creation time, newest first
-  return authorizations.sort((a, b) => b.createdAt - a.createdAt);
+  return authorizations.sort((a: Authorization, b: Authorization) => b.createdAt - a.createdAt);
 }
 
 /**
@@ -256,7 +256,7 @@ export function clearAllAuthorizations(): number {
   const allFacts = store.listFacts();
   let count = 0;
 
-  for (const fact of allFacts) {
+  for (const fact of allFacts as Array<{ key: string; value: string }>) {
     if (fact.key.startsWith(AUTH_PREFIX)) {
       store.deleteFact(fact.key);
       count++;

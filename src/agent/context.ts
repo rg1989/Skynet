@@ -36,7 +36,7 @@ export interface BuiltContext {
 function generateToolKnowledge(allSkills: Skill[], enabledSkills: Skill[]): string {
   if (allSkills.length === 0) return '';
 
-  const enabledNames = new Set(enabledSkills.map(s => s.name));
+  const enabledNames = new Set(enabledSkills.map((s: Skill) => s.name));
   
   // Group skills by category for cleaner presentation
   const categories: Record<string, Skill[]> = {
@@ -74,9 +74,9 @@ function generateToolKnowledge(allSkills: Skill[], enabledSkills: Skill[]): stri
   }
 
   const categoryList = Object.entries(categories)
-    .filter(([_, skills]) => skills.length > 0)
-    .map(([category, skills]) => {
-      const skillList = skills.map(s => {
+    .filter(([_, skills]: [string, Skill[]]) => skills.length > 0)
+    .map(([category, skills]: [string, Skill[]]) => {
+      const skillList = skills.map((s: Skill) => {
         const status = enabledNames.has(s.name) ? '✓' : '○';
         return `  ${status} ${s.name}: ${s.description}`;
       }).join('\n');
@@ -101,10 +101,10 @@ ${categoryList}
 function generateToolInstructions(skills: Skill[]): string {
   if (skills.length === 0) return '';
 
-  const toolList = skills.map(skill => {
+  const toolList = skills.map((skill: Skill) => {
     const argsDesc = skill.parameters?.properties
       ? Object.entries(skill.parameters.properties as Record<string, { description?: string }>)
-          .map(([key, val]) => `    - ${key}: ${val.description || 'No description'}`)
+          .map(([key, val]: [string, { description?: string }]) => `    - ${key}: ${val.description || 'No description'}`)
           .join('\n')
       : '    (no arguments)';
     return `**${skill.name}**: ${skill.description}\n${argsDesc}`;
@@ -242,7 +242,7 @@ export function buildContext(params: ContextBuildParams): BuiltContext {
   
   // Filter out disabled tools using runtime config
   const runtimeConfig = getRuntimeConfig();
-  const enabledSkills = skills.filter(s => runtimeConfig.isToolEnabled(s.name));
+  const enabledSkills = skills.filter((s: Skill) => runtimeConfig.isToolEnabled(s.name));
   
   // Build system prompt with tool knowledge (all skills) and instructions (enabled only)
   const systemPrompt = buildSystemPrompt(config, toolsMode, enabledSkills, skills, persona);
