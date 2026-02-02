@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { useStore, type Message, type SessionInfo } from '../store';
+import { useStore, type Message, type SessionInfo, type AuthorizationScope } from '../store';
 import { ChatMessage } from './ChatMessage';
 import { ChatHeader } from './ChatHeader';
 import { ControlBar } from './ControlBar';
@@ -7,11 +7,12 @@ import { SessionSidebar } from './SessionSidebar';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { TranscribingIndicator } from './TranscribingIndicator';
 import { ListeningOverlay } from './ListeningOverlay';
-import { AvatarModeView } from './AvatarModeView';
 import { StreamingCodeBlock } from './StreamingCodeBlock';
 import { SecurityConfirmModal } from './SecurityConfirmModal';
 import { useWhisperRecognition } from '../hooks/useWhisperRecognition';
-import { useWebSocket, clearCurrentRun } from '../hooks/useWebSocket';
+import { useWebSocket, clearCurrentRun, onVoiceAudio, onWakeStatus } from '../hooks/useWebSocket';
+import { useAudioPlayback } from '../hooks/useAudioPlayback';
+import { useWakeWord } from '../hooks/useWakeWord';
 import { formatThoughtProcess } from '../utils/formatThoughtProcess';
 
 /**
@@ -242,13 +243,38 @@ export function Chat() {
     setIsListening,
     isTranscribing,
     setIsTranscribing,
-    avatarModeEnabled,
     pendingConfirmation,
     setPendingConfirmation,
+    voiceSettings,
+    setWakeWordStatus,
+    setIsTtsSpeaking,
+    needsOnboarding,
   } = useStore();
 
   // WebSocket hook for sending confirmation responses
   const { sendMessage } = useWebSocket();
+
+  // Reference to startListening for wake word callback
+  const startListeningRef = useRef<(() => void) | null>(null);
+
+  // Audio playback hook for TTS
+  const { playAudio } = useAudioPlayback({
+    onPlaybackStart: () => setIsTtsSpeaking(true),
+    onPlaybackEnd: () => setIsTtsSpeaking(false),
+  });
+
+  // Send binary audio to backend for wake word detection
+  const sendAudioChunk = useCallback((data: ArrayBuffer) => {
+    if (connected) {
+      sendMessage('voice:audio_chunk', data);
+    }
+  }, [connected, sendMessage]);
+
+  // Wake word hook - streams audio to backend when enabled
+  useWakeWord({
+    enabled: voiceSettings.wakeWordEnabled && connected,
+    onAudioChunk: sendAudioChunk,
+  });
 
   // Speech recognition hook (local Whisper-based, no API key needed)
   const {
@@ -279,6 +305,41 @@ export function Chat() {
   useEffect(() => {
     setIsListening(speechIsListening);
   }, [speechIsListening, setIsListening]);
+
+  // Keep startListening ref updated for wake word callback
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
+
+  // Register voice audio callback - play TTS audio when received
+  useEffect(() => {
+    onVoiceAudio((audio, sampleRate, messageId) => {
+      // Only play if TTS is enabled and not muted
+      const { voiceSettings } = useStore.getState();
+      if (voiceSettings.ttsEnabled && !voiceSettings.ttsMuted) {
+        playAudio(audio, sampleRate, messageId);
+      }
+    });
+
+    return () => {
+      onVoiceAudio(null);
+    };
+  }, [playAudio]);
+
+  // Register wake status callback - trigger listening when wake word detected
+  useEffect(() => {
+    onWakeStatus((state, detected) => {
+      if (state === 'active' && detected && startListeningRef.current) {
+        console.log('[Chat] Wake word detected, starting listening');
+        startListeningRef.current();
+      }
+      setWakeWordStatus(state as 'listening' | 'active' | 'disabled');
+    });
+
+    return () => {
+      onWakeStatus(null);
+    };
+  }, [setWakeWordStatus]);
 
   // Show speech recognition errors to the user
   useEffect(() => {
@@ -440,7 +501,10 @@ export function Chat() {
           clearActiveTools();
           setIsStreamingClosing(false);
           
-          // Now add the final message with captured thought process
+          // Consume any pending media from tool results
+          const collectedMedia = useStore.getState().consumePendingMedia();
+          
+          // Now add the final message with captured thought process and media
           addMessage({
             id: `msg_${Date.now()}`,
             role: 'assistant',
@@ -449,6 +513,8 @@ export function Chat() {
             // Always include thought process if we captured any streaming content
             // This preserves the step-by-step work the AI did
             thoughtProcess: capturedThoughtProcess?.trim() || undefined,
+            // Attach any media collected during tool execution
+            media: collectedMedia.length > 0 ? collectedMedia : undefined,
           });
           
           // Refresh sessions list to update message counts
@@ -467,6 +533,7 @@ export function Chat() {
         setThinkingContent('');
         setActiveRunId(null);
         clearActiveTools();
+        useStore.getState().clearPendingMedia();
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -476,6 +543,7 @@ export function Chat() {
       setThinkingContent('');
       setActiveRunId(null);
       clearActiveTools();
+      useStore.getState().clearPendingMedia();
       addMessage({
         id: `msg_${Date.now()}`,
         role: 'system',
@@ -483,7 +551,7 @@ export function Chat() {
         timestamp: Date.now(),
       });
     }
-  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, clearActiveTools, currentSessionKey, refreshSessions, avatarModeEnabled]);
+  }, [addMessage, setIsThinking, setThinkingContent, setActiveRunId, clearActiveTools, currentSessionKey, refreshSessions]);
 
   const handleStop = useCallback(() => {
     // Clear module-level WebSocket state to stop processing incoming events
@@ -558,11 +626,13 @@ export function Chat() {
   );
 
   // Tool confirmation handlers
-  const handleConfirmTool = useCallback(() => {
+  const handleConfirmTool = useCallback((remember: boolean, scope?: AuthorizationScope) => {
     if (pendingConfirmation) {
       sendMessage('confirm_response', {
         confirmId: pendingConfirmation.confirmId,
         approved: true,
+        remember,
+        scope,
       });
       setPendingConfirmation(null);
     }
@@ -573,6 +643,7 @@ export function Chat() {
       sendMessage('confirm_response', {
         confirmId: pendingConfirmation.confirmId,
         approved: false,
+        remember: false,
       });
       setPendingConfirmation(null);
     }
@@ -583,94 +654,102 @@ export function Chat() {
       {/* Session sidebar */}
       <SessionSidebar onSessionChange={handleSessionChange} />
 
-      {/* Conditionally render Avatar Mode or standard chat */}
-      {avatarModeEnabled ? (
-        <AvatarModeView
-          messages={messages}
-          onSendMessage={handleSendMessage}
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <ChatHeader isConnected={connected} />
+
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="max-w-3xl mx-auto">
+            {messages.length === 0 && (
+              <div className="text-center text-slate-500 mt-16">
+                <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
+                    <line x1="12" y1="8" x2="12" y2="5" strokeWidth={1.5} strokeLinecap="round" />
+                    <circle cx="12" cy="4" r="1" fill="currentColor" />
+                    <circle cx="9" cy="12" r="1.5" fill="currentColor" />
+                    <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+                    <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
+                  </svg>
+                </div>
+                
+                {needsOnboarding ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-slate-200 mb-3">
+                      Welcome! Let's set up your assistant.
+                    </h2>
+                    <p className="text-slate-400 mb-6 max-w-md mx-auto">
+                      I'll ask you a few questions to personalize your experience - 
+                      your name, what to call me, and how you'd like me to communicate.
+                    </p>
+                    <button
+                      onClick={() => handleSendMessage("Hi, let's get started!")}
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-medium rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:shadow-emerald-500/40 hover:scale-105"
+                    >
+                      Begin Setup
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-xl font-medium text-slate-300 mb-2">Welcome to Skynet</h2>
+                    <p className="text-slate-500">Send a message to get started</p>
+                  </>
+                )}
+              </div>
+            )}
+            
+            {messages.map((msg) => (
+              <ChatMessage key={msg.id} message={msg} />
+            ))}
+            
+            {/* Transcribing indicator - shown while Whisper is processing voice input */}
+            {(isTranscribing || whisperIsTranscribing) && <TranscribingIndicator />}
+            
+            {/* Thinking indicator - shown while waiting for first token or during tool execution */}
+            {(isThinking || activeTools.length > 0) && !thinkingContent && <ThinkingIndicator />}
+            
+            {/* Streaming content - Film reel thought process display */}
+            {/* Styled to match the collapsed ThoughtProcessBox in final messages */}
+            {/* Height stays consistent for seamless transition to final message */}
+            {thinkingContent && (
+              <div 
+                className={`flex gap-3 mb-5 transition-opacity duration-300 ease-out ${
+                  isStreamingClosing ? 'opacity-0' : 'opacity-100'
+                }`}
+              >
+                {/* Bot avatar */}
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
+                    <line x1="12" y1="8" x2="12" y2="5" strokeWidth={1.5} strokeLinecap="round" />
+                    <circle cx="12" cy="4" r="1" fill="currentColor" />
+                    <circle cx="9" cy="12" r="1.5" fill="currentColor" />
+                    <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+                    <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
+                  </svg>
+                </div>
+                {/* Message bubble - matches ChatMessage assistant bubble */}
+                <div className="bg-[#2a2d32] rounded-2xl rounded-tl-md px-4 py-3 border border-slate-600/30 max-w-[75%]">
+                  <StreamingContent content={thinkingContent} isClosing={isStreamingClosing} />
+                </div>
+              </div>
+            )}
+            
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <ControlBar
+          isProcessing={isProcessing}
+          isDisabled={!connected}
+          onSendText={handleSendMessage}
           onStop={handleStop}
           onVoiceInput={handleVoiceInput}
-          isProcessing={isProcessing}
           voiceSupported={voiceSupported}
-          isConnected={connected}
+          messageHistory={userMessageHistory}
         />
-      ) : (
-        /* Main chat area - standard mode */
-        <div className="flex-1 flex flex-col min-w-0">
-          <ChatHeader isConnected={connected} />
-
-          {/* Messages area */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            <div className="max-w-3xl mx-auto">
-              {messages.length === 0 && (
-                <div className="text-center text-slate-500 mt-16">
-                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-                    <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
-                      <line x1="12" y1="8" x2="12" y2="5" strokeWidth={1.5} strokeLinecap="round" />
-                      <circle cx="12" cy="4" r="1" fill="currentColor" />
-                      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
-                      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
-                      <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
-                    </svg>
-                  </div>
-                  <h2 className="text-xl font-medium text-slate-300 mb-2">Welcome to Skynet</h2>
-                  <p className="text-slate-500">Send a message to get started</p>
-                </div>
-              )}
-              
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
-              
-              {/* Transcribing indicator - shown while Whisper is processing voice input */}
-              {(isTranscribing || whisperIsTranscribing) && <TranscribingIndicator />}
-              
-              {/* Thinking indicator - shown while waiting for first token or during tool execution */}
-              {(isThinking || activeTools.length > 0) && !thinkingContent && <ThinkingIndicator />}
-              
-              {/* Streaming content - Film reel thought process display */}
-              {/* Styled to match the collapsed ThoughtProcessBox in final messages */}
-              {/* Height stays consistent for seamless transition to final message */}
-              {thinkingContent && (
-                <div 
-                  className={`flex gap-3 mb-5 transition-opacity duration-300 ease-out ${
-                    isStreamingClosing ? 'opacity-0' : 'opacity-100'
-                  }`}
-                >
-                  {/* Bot avatar */}
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
-                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <rect x="5" y="8" width="14" height="10" rx="2" strokeWidth={1.5} />
-                      <line x1="12" y1="8" x2="12" y2="5" strokeWidth={1.5} strokeLinecap="round" />
-                      <circle cx="12" cy="4" r="1" fill="currentColor" />
-                      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
-                      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
-                      <line x1="9" y1="15" x2="15" y2="15" strokeWidth={1.5} strokeLinecap="round" />
-                    </svg>
-                  </div>
-                  {/* Message bubble - matches ChatMessage assistant bubble */}
-                  <div className="bg-[#2a2d32] rounded-2xl rounded-tl-md px-4 py-3 border border-slate-600/30 max-w-[75%]">
-                    <StreamingContent content={thinkingContent} isClosing={isStreamingClosing} />
-                  </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-
-          <ControlBar
-            isProcessing={isProcessing}
-            isDisabled={!connected}
-            onSendText={handleSendMessage}
-            onStop={handleStop}
-            onVoiceInput={handleVoiceInput}
-            voiceSupported={voiceSupported}
-            messageHistory={userMessageHistory}
-          />
-        </div>
-      )}
+      </div>
 
       {/* Listening overlay - shown during voice input or model loading */}
       {(isListening || whisperLoading) && (

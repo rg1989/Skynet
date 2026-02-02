@@ -1,5 +1,5 @@
 import type { Config } from '../config/schema.js';
-import type { Skill, SkillContext, SkillResult, SessionMessage, WSEventType, ToolConfirmationRequest, ToolConfirmationResponse } from '../types/index.js';
+import type { Skill, SkillContext, SkillResult, SessionMessage, WSEventType, ToolConfirmationRequest, ToolConfirmationResponse, AuthorizationScope } from '../types/index.js';
 import type { LLMProvider, StreamChunk } from '../providers/types.js';
 import type { ProviderManager } from '../providers/index.js';
 import { SessionManager } from './session.js';
@@ -8,6 +8,8 @@ import { toolParser, type ParsedToolCall } from './tool-parser.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { isHighRiskInput, isHighRiskOutput, wrapUntrustedContent } from './security.js';
 import { randomBytes } from 'crypto';
+import { checkToolAuthorization, saveAuthorization } from './authorization.js';
+import { explainCommand } from './command-explain.js';
 
 /**
  * Agent Runner - orchestrates message processing and tool execution
@@ -38,8 +40,14 @@ export interface AgentRunResult {
 export type BroadcastFn = (type: WSEventType, payload: unknown) => void;
 
 // Pending confirmation with resolve/reject callbacks
+interface ConfirmationResult {
+  approved: boolean;
+  remember?: boolean;
+  scope?: AuthorizationScope;
+}
+
 interface PendingConfirmation {
-  resolve: (approved: boolean) => void;
+  resolve: (result: ConfirmationResult) => void;
   reject: (error: Error) => void;
   timeout: NodeJS.Timeout;
   request: ToolConfirmationRequest;
@@ -70,16 +78,23 @@ export class AgentRunner {
 
   /**
    * Request user confirmation for a high-risk tool execution
-   * Returns a promise that resolves to true if approved, false if denied
+   * Returns a promise that resolves to confirmation result including remember option
    */
   private async requestConfirmation(
     runId: string,
     toolName: string,
-    toolParams: Record<string, unknown>
-  ): Promise<boolean> {
+    toolParams: Record<string, unknown>,
+    suggestedScopes: AuthorizationScope[]
+  ): Promise<ConfirmationResult> {
     const confirmId = `confirm_${randomBytes(8).toString('hex')}`;
     
     const riskReason = this.getToolRiskReason(toolName, toolParams);
+    
+    // Get command explanation for exec commands
+    let commandExplanation: ToolConfirmationRequest['commandExplanation'];
+    if (toolName === 'exec' && toolParams.command) {
+      commandExplanation = explainCommand(String(toolParams.command));
+    }
     
     const request: ToolConfirmationRequest = {
       confirmId,
@@ -87,6 +102,9 @@ export class AgentRunner {
       toolName,
       toolParams,
       riskReason,
+      commandExplanation,
+      suggestedScopes,
+      canRemember: true,
     };
 
     return new Promise((resolve, reject) => {
@@ -125,8 +143,12 @@ export class AgentRunner {
     // Remove from pending
     this.pendingConfirmations.delete(response.confirmId);
     
-    // Resolve the promise
-    pending.resolve(response.approved);
+    // Resolve the promise with full result
+    pending.resolve({
+      approved: response.approved,
+      remember: response.remember,
+      scope: response.scope,
+    });
     return true;
   }
 
@@ -517,25 +539,46 @@ export class AgentRunner {
 
     // Check if this is a high-risk output tool that requires confirmation
     if (runId && isHighRiskOutput(name)) {
-      try {
-        const approved = await this.requestConfirmation(runId, name, params);
-        if (!approved) {
-          // Return an error with instructions for the agent
-          // The agent should ASK the user before trying alternative approaches
+      // First check if already authorized
+      const authCheck = checkToolAuthorization(name, params);
+      
+      if (authCheck.authorized) {
+        // Already authorized, proceed without confirmation
+        console.log(`[auth] Tool "${name}" authorized via saved authorization: ${authCheck.matchedAuth?.description}`);
+      } else {
+        // Need user confirmation
+        try {
+          const result = await this.requestConfirmation(runId, name, params, authCheck.suggestedScopes);
+          
+          if (!result.approved) {
+            // Return an error with instructions for the agent
+            // The agent should ASK the user before trying alternative approaches
+            return {
+              success: false,
+              error: `DENIED BY USER: The user denied execution of "${name}" with these parameters. ` +
+                `IMPORTANT: Do NOT automatically try alternative tools or approaches to achieve the same goal. ` +
+                `Instead, inform the user that you were denied and ASK them if they would like you to try a different approach. ` +
+                `Wait for their explicit permission before proceeding with any alternatives.`,
+            };
+          }
+          
+          // If user chose to remember this authorization, save it
+          if (result.remember && result.scope) {
+            try {
+              const auth = saveAuthorization(name, params, result.scope);
+              console.log(`[auth] Saved new authorization: ${auth.description}`);
+            } catch (error) {
+              console.warn(`[auth] Failed to save authorization:`, error);
+              // Continue anyway - the tool was approved
+            }
+          }
+        } catch (error) {
           return {
             success: false,
-            error: `DENIED BY USER: The user denied execution of "${name}" with these parameters. ` +
-              `IMPORTANT: Do NOT automatically try alternative tools or approaches to achieve the same goal. ` +
-              `Instead, inform the user that you were denied and ASK them if they would like you to try a different approach. ` +
-              `Wait for their explicit permission before proceeding with any alternatives.`,
+            error: `Confirmation failed for ${name}: ${error instanceof Error ? error.message : String(error)}. ` +
+              `Please ask the user if they want to retry or try a different approach.`,
           };
         }
-      } catch (error) {
-        return {
-          success: false,
-          error: `Confirmation failed for ${name}: ${error instanceof Error ? error.message : String(error)}. ` +
-            `Please ask the user if they want to retry or try a different approach.`,
-        };
       }
     }
 

@@ -11,18 +11,118 @@ interface ProviderInfo {
   isAvailable: boolean;
 }
 
+interface VoiceInfo {
+  id: string;
+  name: string;
+}
+
+interface WakeWordModel {
+  id: string;
+  name: string;
+}
+
+interface Authorization {
+  id: string;
+  toolName: string;
+  scope: 'exact' | 'pattern' | 'tool';
+  pattern: string;
+  description: string;
+  createdAt: number;
+}
+
 // localStorage key for saving enabled tools before switching to Ollama
 const STORAGE_KEY_SAVED_TOOLS = 'skynet_saved_enabled_tools';
 
-type SettingsTab = 'general' | 'providers' | 'system';
+// Tool risk classifications for display
+const HIGH_OUTPUT_TOOLS = ['gmail_send', 'exec', 'write_file', 'edit_file'];
+const HIGH_INPUT_TOOLS = ['gmail_read', 'web_fetch', 'web_search', 'read_file'];
+
+function getToolRiskLevel(toolName: string): 'high-output' | 'high-input' | 'low' {
+  if (HIGH_OUTPUT_TOOLS.includes(toolName)) return 'high-output';
+  if (HIGH_INPUT_TOOLS.includes(toolName)) return 'high-input';
+  return 'low';
+}
+
+function getToolRiskBadge(toolName: string) {
+  const risk = getToolRiskLevel(toolName);
+  if (risk === 'high-output') {
+    return {
+      label: 'Requires Approval',
+      className: 'bg-red-600/20 text-red-400 border-red-600/30',
+      title: 'This tool performs actions that can modify files, send data, or execute commands. Requires your approval each time unless you save an authorization.',
+    };
+  }
+  if (risk === 'high-input') {
+    return {
+      label: 'External Data',
+      className: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
+      title: 'This tool fetches data from external sources. Content is marked as untrusted to prevent prompt injection.',
+    };
+  }
+  return null;
+}
+
+type SettingsTab = 'providers' | 'tools' | 'general' | 'assistant';
+
+// Collapsible section component
+function CollapsibleSection({ 
+  title, 
+  icon, 
+  iconColor = 'text-slate-400',
+  children, 
+  defaultOpen = false,
+  badge,
+}: { 
+  title: string; 
+  icon: React.ReactNode;
+  iconColor?: string;
+  children: React.ReactNode; 
+  defaultOpen?: boolean;
+  badge?: React.ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  
+  return (
+    <section className="bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full p-5 flex items-center justify-between hover:bg-slate-700/30 transition-colors"
+      >
+        <h3 className={`font-medium flex items-center gap-2 ${iconColor}`}>
+          {icon}
+          <span className="text-white">{title}</span>
+          {badge}
+        </h3>
+        <svg 
+          className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} 
+          fill="none" 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="px-5 pb-5 border-t border-slate-700/50">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export function Settings() {
-  const { settings, setSettings, ttsEnabled, setTtsEnabled, selectedVoiceName, setSelectedVoiceName } = useStore();
+  const { settings, setSettings, voiceSettings, setVoiceSettings, voiceServiceAvailable, setVoiceServiceAvailable } = useStore();
   const { showToast } = useToast();
   
-  // Get active tab from URL params, default to 'general'
+  // Get active tab from URL params, default to 'providers'
   const { tab } = useParams<{ tab: string }>();
-  const activeTab: SettingsTab = (tab === 'providers' ? 'providers' : tab === 'system' ? 'system' : 'general');
+  const activeTab: SettingsTab = (
+    tab === 'tools' ? 'tools' : 
+    tab === 'general' ? 'general' : 
+    tab === 'assistant' ? 'assistant' : 
+    'providers'
+  );
   
   // Local state for editable fields
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -37,36 +137,18 @@ export function Settings() {
   
   // Ollama switch modal state
   const [showOllamaModal, setShowOllamaModal] = useState(false);
+  
+  // Reset assistant modal state
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   // Voice settings state
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const isTtsSupported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const [availableVoices, setAvailableVoices] = useState<VoiceInfo[]>([]);
+  const [availableWakeWordModels, setAvailableWakeWordModels] = useState<WakeWordModel[]>([]);
 
-  // Load available voices
-  useEffect(() => {
-    if (!isTtsSupported) return;
-
-    const loadVoices = () => {
-      const voices = speechSynthesis.getVoices();
-      setAvailableVoices(voices);
-      
-      // If we have a stored voice name but it's not set, find and set it
-      if (selectedVoiceName && voices.length > 0) {
-        const matchingVoice = voices.find(v => v.name === selectedVoiceName);
-        if (!matchingVoice) {
-          // Stored voice not found, clear the selection
-          setSelectedVoiceName(null);
-        }
-      }
-    };
-
-    loadVoices();
-    speechSynthesis.addEventListener('voiceschanged', loadVoices);
-
-    return () => {
-      speechSynthesis.removeEventListener('voiceschanged', loadVoices);
-    };
-  }, [isTtsSupported, selectedVoiceName, setSelectedVoiceName]);
+  // Authorization state
+  const [authorizations, setAuthorizations] = useState<Authorization[]>([]);
+  const [loadingAuths, setLoadingAuths] = useState(false);
 
   // Fetch all settings on mount
   useEffect(() => {
@@ -74,6 +156,10 @@ export function Settings() {
     fetchTools();
     fetchSystemPrompt();
     fetchApiKeys();
+    fetchVoiceStatus();
+    fetchVoices();
+    fetchWakeWordModels();
+    fetchAuthorizations();
   }, []);
 
   // Use showToast from the Toast component for notifications
@@ -116,9 +202,9 @@ export function Settings() {
     try {
       const response = await fetch('/api/tools');
       const data = await response.json();
-      setSettings({
+      setSettings({ 
         tools: data.tools || [],
-        toolsMode: data.toolsMode || 'hybrid',
+        toolsMode: data.mode || 'hybrid',
       });
     } catch (error) {
       console.error('Failed to fetch tools:', error);
@@ -130,7 +216,7 @@ export function Settings() {
       const response = await fetch('/api/system-prompt');
       const data = await response.json();
       setSystemPrompt(data.prompt || '');
-      setSettings({
+      setSettings({ 
         systemPrompt: data.prompt || '',
         isDefaultPrompt: data.isDefault,
       });
@@ -143,94 +229,151 @@ export function Settings() {
     try {
       const response = await fetch('/api/config/api-keys');
       const data = await response.json();
-      // Keys are masked on the server side, so we just show placeholders if configured
-      setOpenaiKey(data.openai?.configured ? '••••••••••••••••' : '');
-      setAnthropicKey(data.anthropic?.configured ? '••••••••••••••••' : '');
+      // API returns masked keys (e.g., "sk-...abc123")
+      if (data.openai) setOpenaiKey(data.openai);
+      if (data.anthropic) setAnthropicKey(data.anthropic);
     } catch (error) {
       console.error('Failed to fetch API keys:', error);
     }
   };
 
-  const testProviderConnection = async (provider: string): Promise<{ success: boolean; message: string }> => {
+  const fetchVoiceStatus = async () => {
     try {
-      const response = await fetch(`/api/config/test-connection/${provider}`, {
-        method: 'POST',
-      });
+      const response = await fetch('/api/voice/status');
       const data = await response.json();
-      return {
-        success: data.success,
-        message: data.success ? data.message : (data.error || 'Connection failed'),
-      };
-    } catch {
-      return { success: false, message: `Failed to test ${provider} connection` };
+      setVoiceServiceAvailable(data.connected);
+    } catch (error) {
+      console.error('Failed to fetch voice status:', error);
+      setVoiceServiceAvailable(false);
     }
   };
 
-  const handleSaveApiKeys = async () => {
+  const fetchVoices = async () => {
     try {
-      setSavingKeys(true);
-      
-      const keys: { openai?: string; anthropic?: string } = {};
-      
-      // Only send keys that have been changed (not placeholders)
-      if (openaiKey && !openaiKey.startsWith('••')) {
-        keys.openai = openaiKey;
-      }
-      if (anthropicKey && !anthropicKey.startsWith('••')) {
-        keys.anthropic = anthropicKey;
-      }
-      
-      if (Object.keys(keys).length === 0) {
-        showToast('error', 'No keys to save');
-        return;
-      }
-      
-      const response = await fetch('/api/config/api-keys', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(keys),
+      const response = await fetch('/api/voice/voices');
+      const data = await response.json();
+      const voices = (data.voices || {}) as Record<string, string>;
+      const voiceList = Object.entries(voices).map(([id, name]) => ({ 
+        id, 
+        name: name as string 
+      }));
+      setAvailableVoices(voiceList);
+    } catch (error) {
+      console.error('Failed to fetch voices:', error);
+    }
+  };
+
+  const fetchWakeWordModels = async () => {
+    try {
+      const response = await fetch('/api/voice/wakeword/models');
+      const data = await response.json();
+      const models = (data.models || {}) as Record<string, string>;
+      const modelList = Object.entries(models).map(([id, name]) => ({ 
+        id, 
+        name: name as string 
+      }));
+      setAvailableWakeWordModels(modelList);
+    } catch (error) {
+      console.error('Failed to fetch wake word models:', error);
+    }
+  };
+
+  const fetchAuthorizations = async () => {
+    setLoadingAuths(true);
+    try {
+      const response = await fetch('/api/authorizations');
+      const data = await response.json();
+      setAuthorizations(data.authorizations || []);
+    } catch (error) {
+      console.error('Failed to fetch authorizations:', error);
+    } finally {
+      setLoadingAuths(false);
+    }
+  };
+
+  const handleRevokeAuthorization = async (authId: string) => {
+    try {
+      const response = await fetch(`/api/authorizations/${encodeURIComponent(authId)}`, {
+        method: 'DELETE',
       });
       
       if (response.ok) {
-        showToast('success', 'API keys saved. Testing connections...');
-        setKeysDirty(false);
-        
-        // Refresh providers to update availability
-        await fetchProviders();
-        // Update placeholders
-        await fetchApiKeys();
-        
-        // Test connections for newly added keys
-        const testResults: string[] = [];
-        
-        if (keys.anthropic) {
-          const result = await testProviderConnection('anthropic');
-          testResults.push(result.success 
-            ? '✓ Anthropic connected' 
-            : `✗ Anthropic: ${result.message}`);
-        }
-        
-        if (keys.openai) {
-          const result = await testProviderConnection('openai');
-          testResults.push(result.success 
-            ? '✓ OpenAI connected' 
-            : `✗ OpenAI: ${result.message}`);
-        }
-        
-        // Show combined result
-        if (testResults.length > 0) {
-          const allSuccess = testResults.every(r => r.startsWith('✓'));
-          showToast(allSuccess ? 'success' : 'error', testResults.join(' | '));
-        }
+        setAuthorizations(prev => prev.filter(a => a.id !== authId));
+        showToast('success', 'Authorization revoked');
       } else {
-        const data = await response.json();
-        showToast('error', data.error || 'Failed to save API keys');
+        showToast('error', 'Failed to revoke authorization');
       }
     } catch (error) {
-      showToast('error', 'Failed to save API keys');
-    } finally {
-      setSavingKeys(false);
+      showToast('error', 'Failed to revoke authorization');
+      console.error('Failed to revoke authorization:', error);
     }
+  };
+
+  const handleClearAllAuthorizations = async () => {
+    try {
+      const response = await fetch('/api/authorizations', {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        setAuthorizations([]);
+        showToast('success', 'All authorizations cleared');
+      } else {
+        showToast('error', 'Failed to clear authorizations');
+      }
+    } catch (error) {
+      showToast('error', 'Failed to clear authorizations');
+      console.error('Failed to clear authorizations:', error);
+    }
+  };
+
+  const handleProviderChange = async (provider: string) => {
+    // If switching to Ollama, show the confirmation modal
+    if (provider === 'ollama') {
+      setShowOllamaModal(true);
+      return;
+    }
+    
+    await performProviderSwitch(provider);
+  };
+
+  const performProviderSwitch = async (provider: string, disableAllTools: boolean = false) => {
+    try {
+      const response = await fetch('/api/config/provider', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSettings({ 
+          currentProvider: data.provider,
+          currentModel: data.model,
+        });
+        await fetchModels(data.provider);
+        showToast('success', `Switched to ${provider}`);
+        
+        // If switching to Ollama, disable all tools except meta tools
+        if (disableAllTools) {
+          await disableAllToolsExceptMeta();
+        } else if (provider !== 'ollama') {
+          // When switching away from Ollama, restore saved tools
+          await restoreSavedTools();
+        }
+      }
+    } catch (error) {
+      showToast('error', 'Failed to switch provider');
+    }
+  };
+
+  const handleOllamaConfirm = async () => {
+    setShowOllamaModal(false);
+    await performProviderSwitch('ollama', true);
+  };
+
+  const handleOllamaCancel = () => {
+    setShowOllamaModal(false);
   };
 
   // Save current enabled tools to localStorage (before switching to Ollama)
@@ -241,109 +384,76 @@ export function Settings() {
     localStorage.setItem(STORAGE_KEY_SAVED_TOOLS, JSON.stringify(enabledTools));
   };
 
-  // Restore saved tools from localStorage (when switching back from Ollama)
-  const restoreSavedTools = async () => {
-    const saved = localStorage.getItem(STORAGE_KEY_SAVED_TOOLS);
-    let toolsToEnable: string[];
+  // Disable all tools except the meta/self-config tools
+  const disableAllToolsExceptMeta = async () => {
+    // First save current enabled tools
+    saveEnabledTools();
     
-    if (saved) {
-      toolsToEnable = JSON.parse(saved);
-    } else {
-      // No saved state = enable all tools (default behavior)
-      toolsToEnable = settings.tools.map(t => t.name);
-    }
-    
-    await fetch('/api/tools/enable-bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tools: toolsToEnable }),
-    });
-  };
-
-  // Perform the actual provider switch
-  const doProviderSwitch = async (provider: string) => {
     try {
-      const response = await fetch('/api/config/provider', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
+      const response = await fetch('/api/tools/disable-all-except-meta', {
+        method: 'POST',
       });
       
       if (response.ok) {
-        const data = await response.json();
-        setSettings({
-          currentProvider: data.provider,
-          currentModel: data.model,
-        });
-        await fetchModels(provider);
-        return true;
+        await fetchTools(); // Refresh tools list
+        showToast('success', 'Tools disabled for Ollama (except meta tools)');
       }
-      return false;
     } catch (error) {
-      showToast('error', 'Failed to change provider');
-      return false;
+      showToast('error', 'Failed to disable tools');
     }
   };
 
-  const handleProviderChange = async (provider: string) => {
-    // If switching TO Ollama from a cloud provider, show confirmation modal
-    if (provider === 'ollama' && settings.currentProvider !== 'ollama') {
-      setShowOllamaModal(true);
-      return;
+  // Restore previously saved tools from localStorage
+  const restoreSavedTools = async () => {
+    const savedToolsJson = localStorage.getItem(STORAGE_KEY_SAVED_TOOLS);
+    if (!savedToolsJson) return;
+    
+    try {
+      const savedTools = JSON.parse(savedToolsJson) as string[];
+      if (savedTools.length === 0) return;
+      
+      const response = await fetch('/api/tools/enable-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tools: savedTools }),
+      });
+      
+      if (response.ok) {
+        await fetchTools(); // Refresh tools list
+        showToast('success', 'Restored your previous tool selection');
+        localStorage.removeItem(STORAGE_KEY_SAVED_TOOLS); // Clean up
+      }
+    } catch (error) {
+      console.error('Failed to restore tools:', error);
     }
-    
-    // If switching FROM Ollama to a cloud provider, restore saved tools
-    if (settings.currentProvider === 'ollama' && provider !== 'ollama') {
-      await restoreSavedTools();
-      await doProviderSwitch(provider);
-      await fetchTools();
-      showToast('success', `Switched to ${provider}. Tools restored.`);
-      return;
-    }
-    
-    // Normal switch (e.g., between cloud providers or already on Ollama)
-    if (await doProviderSwitch(provider)) {
-      showToast('success', `Switched to ${provider}`);
-    }
-  };
-
-  // Handle confirmation to switch to Ollama
-  const handleOllamaConfirm = async () => {
-    // Save current enabled tools before switching
-    saveEnabledTools();
-    
-    // Disable all tools except meta-tools
-    await fetch('/api/tools/disable-all-except-meta', { method: 'POST' });
-    
-    // Switch to Ollama
-    await doProviderSwitch('ollama');
-    
-    // Refresh tools list to show updated enabled states
-    await fetchTools();
-    
-    setShowOllamaModal(false);
-    showToast('success', 'Switched to Ollama. Meta-tools enabled for self-management.');
-  };
-
-  const handleOllamaCancel = () => {
-    setShowOllamaModal(false);
   };
 
   const handleModelChange = async (model: string) => {
     try {
+      // Find the full model info to check size
+      const modelInfo = settings.availableModels.find((m: { name: string; description?: string; size?: number }) => m.name === model);
+      
       const response = await fetch('/api/config/provider', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({ 
+          provider: settings.currentProvider,
+          model,
+        }),
       });
       
       if (response.ok) {
-        const data = await response.json();
-        setSettings({ currentModel: data.model });
-        showToast('success', `Model changed to ${model}`);
+        setSettings({ currentModel: model });
+        
+        // Show size info if available
+        if (modelInfo?.size) {
+          showToast('success', `Switched to ${model} (${formatBytes(modelInfo.size)})`);
+        } else {
+          showToast('success', `Switched to ${model}`);
+        }
       }
     } catch (error) {
-      showToast('error', 'Failed to change model');
+      showToast('error', 'Failed to switch model');
     }
   };
 
@@ -374,19 +484,35 @@ export function Settings() {
       
       if (response.ok) {
         setSettings({
-          tools: settings.tools.map(t =>
+          tools: settings.tools.map(t => 
             t.name === toolName ? { ...t, enabled } : t
           ),
         });
       }
     } catch (error) {
-      showToast('error', `Failed to toggle ${toolName}`);
+      showToast('error', 'Failed to toggle tool');
+    }
+  };
+
+  const handleToggleAllTools = async (enableAll: boolean) => {
+    try {
+      const endpoint = enableAll ? '/api/tools/enable-all' : '/api/tools/disable-all';
+      const response = await fetch(endpoint, { method: 'POST' });
+      
+      if (response.ok) {
+        setSettings({
+          tools: settings.tools.map(t => ({ ...t, enabled: enableAll })),
+        });
+        showToast('success', enableAll ? 'All tools enabled' : 'All tools disabled');
+      }
+    } catch (error) {
+      showToast('error', 'Failed to toggle tools');
     }
   };
 
   const handleSavePrompt = async () => {
+    setSavingPrompt(true);
     try {
-      setSavingPrompt(true);
       const response = await fetch('/api/system-prompt', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -407,17 +533,44 @@ export function Settings() {
 
   const handleResetPrompt = async () => {
     try {
-      const response = await fetch('/api/system-prompt', { method: 'DELETE' });
+      const response = await fetch('/api/system-prompt', {
+        method: 'DELETE',
+      });
       
       if (response.ok) {
         const data = await response.json();
-        setSystemPrompt(data.prompt || '');
-        setSettings({ systemPrompt: data.prompt || '', isDefaultPrompt: true });
+        setSystemPrompt(data.prompt);
+        setSettings({ systemPrompt: data.prompt, isDefaultPrompt: true });
         setPromptDirty(false);
-        showToast('success', 'Reset to default prompt');
+        showToast('success', 'Prompt reset to default');
       }
     } catch (error) {
       showToast('error', 'Failed to reset prompt');
+    }
+  };
+
+  const handleSaveApiKeys = async () => {
+    setSavingKeys(true);
+    try {
+      const response = await fetch('/api/config/api-keys', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          openai: openaiKey.startsWith('sk-...') ? undefined : openaiKey,
+          anthropic: anthropicKey.startsWith('sk-ant-...') ? undefined : anthropicKey,
+        }),
+      });
+      
+      if (response.ok) {
+        setKeysDirty(false);
+        showToast('success', 'API keys saved');
+        // Refresh providers to update availability
+        await fetchProviders();
+      }
+    } catch (error) {
+      showToast('error', 'Failed to save API keys');
+    } finally {
+      setSavingKeys(false);
     }
   };
 
@@ -430,16 +583,44 @@ export function Settings() {
       const data = await response.json();
       
       if (response.ok) {
-        showToast('success', `Model warmed up in ${data.durationMs}ms`);
+        showToast('success', `Model ready! (${data.durationMs}ms)`);
       } else {
         showToast('error', data.error || 'Warmup failed');
       }
     } catch (error) {
-      showToast('error', 'Failed to warmup model');
+      showToast('error', 'Warmup request failed');
     } finally {
       setSettings({ warmingUp: false });
     }
   }, [setSettings]);
+
+  // Handle reset assistant - clears all onboarding data
+  const handleResetAssistant = async () => {
+    setResetting(true);
+    try {
+      const response = await fetch('/api/onboarding/reset', { method: 'DELETE' });
+      if (response.ok) {
+        showToast('success', 'Assistant reset. Reloading...');
+        // Reload the page to trigger onboarding
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 1000);
+      } else {
+        const data = await response.json();
+        showToast('error', data.error || 'Failed to reset assistant');
+      }
+    } catch (error) {
+      showToast('error', 'Failed to reset assistant');
+      console.error('Reset error:', error);
+    } finally {
+      setResetting(false);
+      setShowResetModal(false);
+    }
+  };
+
+  const handleVoiceSettingChange = (updates: Partial<typeof voiceSettings>) => {
+    setVoiceSettings(updates);
+  };
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -456,35 +637,22 @@ export function Settings() {
       {/* Tab Navigation */}
       <div className="flex gap-1 mb-6 bg-slate-800/50 p-1 rounded-xl border border-slate-700/50">
         <Link
-          to="/settings/general"
-          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-            activeTab === 'general'
-              ? 'bg-violet-600 text-white'
-              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-          </svg>
-          General
-        </Link>
-        <Link
           to="/settings/providers"
-          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+          className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
             activeTab === 'providers'
               ? 'bg-violet-600 text-white'
               : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
           }`}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          Providers
+          <span className="hidden sm:inline">Providers</span>
         </Link>
         <Link
-          to="/settings/system"
-          className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
-            activeTab === 'system'
+          to="/settings/tools"
+          className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            activeTab === 'tools'
               ? 'bg-violet-600 text-white'
               : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
           }`}
@@ -493,94 +661,37 @@ export function Settings() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          System Prompt & Tools
+          <span className="hidden sm:inline">Tools & Rules</span>
+        </Link>
+        <Link
+          to="/settings/general"
+          className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            activeTab === 'general'
+              ? 'bg-violet-600 text-white'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          <span className="hidden sm:inline">General</span>
+        </Link>
+        <Link
+          to="/settings/assistant"
+          className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+            activeTab === 'assistant'
+              ? 'bg-violet-600 text-white'
+              : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <span className="hidden sm:inline">Assistant</span>
         </Link>
       </div>
 
       <div className="space-y-6">
-        {/* GENERAL TAB */}
-        {activeTab === 'general' && (
-          <>
-            {/* Voice & Audio Section */}
-            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
-              <h3 className="font-medium mb-4 flex items-center gap-2">
-                <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                </svg>
-                Voice & Audio
-              </h3>
-
-              <p className="text-sm text-slate-400 mb-4">
-                Configure whether the AI speaks responses aloud and select a voice. These settings also apply to the Avatar mode.
-              </p>
-
-              {/* TTS Support Warning */}
-              {!isTtsSupported && (
-                <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                  <p className="text-sm text-amber-400">
-                    Text-to-speech is not supported in your browser.
-                  </p>
-                </div>
-              )}
-
-              {/* AI Voice Toggle */}
-              <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-lg mb-4">
-                <div className="flex-1">
-                  <div className="font-medium text-sm flex items-center gap-2">
-                    Enable AI Voice
-                    {ttsEnabled && (
-                      <span className="text-xs bg-emerald-600 px-2 py-0.5 rounded">On</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    When enabled, the AI will speak its responses aloud
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer ml-4">
-                  <input
-                    type="checkbox"
-                    checked={ttsEnabled}
-                    onChange={(e) => {
-                      setTtsEnabled(e.target.checked);
-                      showToast('success', e.target.checked ? 'AI voice enabled' : 'AI voice disabled');
-                    }}
-                    disabled={!isTtsSupported}
-                    className="sr-only peer"
-                  />
-                  <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600 ${!isTtsSupported ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
-                </label>
-              </div>
-
-              {/* Voice Selection */}
-              {isTtsSupported && (
-                <div className={ttsEnabled ? '' : 'opacity-50 pointer-events-none'}>
-                  <label className="block text-sm text-slate-400 mb-2">Voice</label>
-                  <select
-                    value={selectedVoiceName || ''}
-                    onChange={(e) => {
-                      const voiceName = e.target.value || null;
-                      setSelectedVoiceName(voiceName);
-                      showToast('success', voiceName ? `Voice changed to ${voiceName.split(' ').slice(0, 2).join(' ')}` : 'Voice set to System Default');
-                    }}
-                    disabled={!ttsEnabled}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                  >
-                    <option value="">System Default</option>
-                    {availableVoices.map((voice) => (
-                      <option key={voice.name} value={voice.name}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-slate-500 mt-2">
-                    Select a voice for the AI to use when speaking. Available voices depend on your browser and system.
-                  </p>
-                </div>
-              )}
-            </section>
-          </>
-        )}
-
         {/* PROVIDERS TAB */}
         {activeTab === 'providers' && (
           <>
@@ -599,7 +710,7 @@ export function Settings() {
                   <label className="block text-sm text-slate-400 mb-2">Provider</label>
                   <select
                     value={settings.currentProvider}
-                    onChange={(e) => handleProviderChange(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleProviderChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
                   >
                     {settings.providers.map((p) => (
@@ -615,7 +726,7 @@ export function Settings() {
                   <label className="block text-sm text-slate-400 mb-2">Model</label>
                   <select
                     value={settings.currentModel}
-                    onChange={(e) => handleModelChange(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleModelChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
                   >
                     {settings.availableModels.map((m) => (
@@ -625,32 +736,6 @@ export function Settings() {
                     ))}
                   </select>
                 </div>
-              </div>
-
-              {/* Warmup button */}
-              <div className="mt-4">
-                <button
-                  onClick={handleWarmup}
-                  disabled={settings.warmingUp}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                >
-                  {settings.warmingUp ? (
-                    <>
-                      <span className="animate-spin">⚙️</span>
-                      Warming up...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                      </svg>
-                      Warmup Model
-                    </>
-                  )}
-                </button>
-                <p className="text-xs text-slate-500 mt-2">
-                  Pre-loads the model into memory for faster responses
-                </p>
               </div>
             </section>
 
@@ -674,7 +759,7 @@ export function Settings() {
                   <input
                     type="password"
                     value={openaiKey}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       setOpenaiKey(e.target.value);
                       setKeysDirty(true);
                     }}
@@ -692,7 +777,7 @@ export function Settings() {
                   <input
                     type="password"
                     value={anthropicKey}
-                    onChange={(e) => {
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       setAnthropicKey(e.target.value);
                       setKeysDirty(true);
                     }}
@@ -718,8 +803,8 @@ export function Settings() {
           </>
         )}
 
-        {/* SYSTEM PROMPT & TOOLS TAB */}
-        {activeTab === 'system' && (
+        {/* TOOLS & RULES TAB */}
+        {activeTab === 'tools' && (
           <>
             {/* System Prompt Section */}
             <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
@@ -735,7 +820,7 @@ export function Settings() {
 
               <textarea
                 value={systemPrompt}
-                onChange={(e) => {
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                   setSystemPrompt(e.target.value);
                   setPromptDirty(e.target.value !== settings.systemPrompt);
                 }}
@@ -800,31 +885,471 @@ export function Settings() {
 
               {/* Tools list */}
               {settings.toolsMode !== 'disabled' && (
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {settings.tools.map((tool) => (
-                    <div
-                      key={tool.name}
-                      className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm">{tool.name}</div>
-                        <div className="text-xs text-slate-500 truncate">{tool.description}</div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer ml-4">
-                        <input
-                          type="checkbox"
-                          checked={tool.enabled}
-                          onChange={(e) => handleToolToggle(tool.name, e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-                      </label>
+                <>
+                  {/* Enable All Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg mb-3 border border-slate-700/50">
+                    <div>
+                      <div className="font-medium text-sm">Enable All Tools</div>
+                      <div className="text-xs text-slate-500">Toggle all tools on or off at once</div>
                     </div>
-                  ))}
-                </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={settings.tools.length > 0 && settings.tools.every((t: { name: string; enabled: boolean }) => t.enabled)}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleToggleAllTools(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+                  
+                  <div className="max-h-80 overflow-y-auto space-y-2">
+                  {settings.tools.map((tool) => {
+                    const riskBadge = getToolRiskBadge(tool.name);
+                    return (
+                      <div
+                        key={tool.name}
+                        className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg group relative"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-sm">{tool.name}</span>
+                            {riskBadge && (
+                              <span 
+                                className={`text-xs px-1.5 py-0.5 rounded border ${riskBadge.className}`}
+                                title={riskBadge.title}
+                              >
+                                {riskBadge.label}
+                              </span>
+                            )}
+                          </div>
+                          {/* Full description with tooltip on hover */}
+                          <div 
+                            className="text-xs text-slate-500 mt-1 cursor-help"
+                            title={tool.description}
+                          >
+                            <span className="line-clamp-2">{tool.description}</span>
+                          </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer ml-4 flex-shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={tool.enabled}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleToolToggle(tool.name, e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                      </div>
+                    );
+                  })}
+                  </div>
+                </>
               )}
             </section>
           </>
+        )}
+
+        {/* GENERAL TAB */}
+        {activeTab === 'general' && (
+          <>
+            {/* Model Warmup Section */}
+            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+              <h3 className="font-medium mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Model Warmup
+              </h3>
+              
+              <p className="text-sm text-slate-400 mb-4">
+                Pre-load the current model into memory for faster response times on the first message.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleWarmup}
+                  disabled={settings.warmingUp}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-700 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  {settings.warmingUp ? (
+                    <>
+                      <span className="animate-spin">⚙️</span>
+                      Warming up...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Warmup Model
+                    </>
+                  )}
+                </button>
+                
+                <div className="text-sm text-slate-500">
+                  Current: <span className="text-slate-300">{settings.currentProvider}</span> / <span className="text-slate-300">{settings.currentModel || 'default'}</span>
+                </div>
+              </div>
+            </section>
+
+            {/* App Info Section */}
+            <section className="bg-slate-800/50 rounded-xl p-5 border border-slate-700/50">
+              <h3 className="font-medium mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                About
+              </h3>
+              
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Application</span>
+                  <span className="text-slate-300">Skynet Lite</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Voice Service</span>
+                  <span className={voiceServiceAvailable ? 'text-emerald-400' : 'text-slate-500'}>
+                    {voiceServiceAvailable ? 'Connected' : 'Not Available'}
+                  </span>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* ASSISTANT TAB */}
+        {activeTab === 'assistant' && (
+          <div className="space-y-4">
+            {/* Voice Section - Collapsed by default */}
+            <CollapsibleSection
+              title="Voice"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+              }
+              iconColor="text-violet-400"
+              defaultOpen={false}
+              badge={
+                voiceServiceAvailable ? (
+                  <span className="text-xs bg-emerald-600/20 text-emerald-400 px-2 py-0.5 rounded ml-2">Connected</span>
+                ) : (
+                  <span className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded ml-2">Not Available</span>
+                )
+              }
+            >
+              <div className="pt-4 space-y-6">
+                {/* Voice Service Warning */}
+                {!voiceServiceAvailable && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <div>
+                        <p className="text-amber-400 font-medium text-sm">Voice Service Not Available</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          To enable TTS and wake word features, set up the voice service:
+                        </p>
+                        <code className="block text-xs text-slate-500 mt-2 bg-slate-900 p-2 rounded font-mono">
+                          cd voice && python3 -m venv venv && source venv/bin/activate && pip install -e .
+                        </code>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TTS Settings */}
+                <div>
+                  <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.586a2 2 0 001.414.586h1.586a1 1 0 01.707.293l2.414 2.414a1 1 0 001.414 0l.586-.586a1 1 0 00.293-.707V6a1 1 0 00-.293-.707l-.586-.586a1 1 0 00-1.414 0L9.293 7.121A1 1 0 018.586 7.414H7a2 2 0 00-2 2v4.172a2 2 0 00.586 1.414z" />
+                    </svg>
+                    Text-to-Speech
+                  </h4>
+                  
+                  {/* TTS Enable Toggle */}
+                  <div className="flex items-center justify-between mb-4 p-3 bg-slate-900/50 rounded-lg">
+                    <div>
+                      <div className="font-medium text-sm">Enable TTS</div>
+                      <div className="text-xs text-slate-500">Read AI responses aloud</div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={voiceSettings.ttsEnabled}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          handleVoiceSettingChange({ ttsEnabled: e.target.checked });
+                          showToast('success', e.target.checked ? 'TTS enabled' : 'TTS disabled');
+                        }}
+                        disabled={!voiceServiceAvailable}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-disabled:opacity-50"></div>
+                    </label>
+                  </div>
+
+                  {/* Voice Selector */}
+                  <div className="mb-4">
+                    <label className="block text-sm text-slate-400 mb-2">Voice</label>
+                    <select
+                      value={voiceSettings.ttsVoice}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                        handleVoiceSettingChange({ ttsVoice: e.target.value });
+                        showToast('success', 'Voice changed');
+                      }}
+                      disabled={!voiceServiceAvailable || !voiceSettings.ttsEnabled}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-violet-500 disabled:opacity-50"
+                    >
+                      {availableVoices.map((voice) => (
+                        <option key={voice.id} value={voice.id}>
+                          {voice.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Speed Slider */}
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">
+                      Speed: {voiceSettings.ttsSpeed.toFixed(1)}x
+                    </label>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.0"
+                      step="0.1"
+                      value={voiceSettings.ttsSpeed}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ ttsSpeed: parseFloat(e.target.value) })}
+                      disabled={!voiceServiceAvailable || !voiceSettings.ttsEnabled}
+                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-500 disabled:opacity-50"
+                    />
+                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                      <span>0.5x</span>
+                      <span>1.0x</span>
+                      <span>2.0x</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Wake Word Settings */}
+                <div className="pt-4 border-t border-slate-700/50">
+                  <h4 className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Wake Word Detection
+                  </h4>
+
+                  {/* Wake Word Enable Toggle */}
+                  <div className="flex items-center justify-between mb-4 p-3 bg-slate-900/50 rounded-lg">
+                    <div>
+                      <div className="font-medium text-sm">Enable Wake Word</div>
+                      <div className="text-xs text-slate-500">Say the wake word to start listening</div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={voiceSettings.wakeWordEnabled}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          handleVoiceSettingChange({ wakeWordEnabled: e.target.checked });
+                          showToast('success', e.target.checked ? 'Wake word enabled' : 'Wake word disabled');
+                        }}
+                        disabled={!voiceServiceAvailable}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-disabled:opacity-50"></div>
+                    </label>
+                  </div>
+
+                  {/* Wake Word Model Selector */}
+                  <div className="mb-4">
+                    <label className="block text-sm text-slate-400 mb-2">Wake Word</label>
+                    <select
+                      value={voiceSettings.wakeWordModel}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+                        handleVoiceSettingChange({ wakeWordModel: e.target.value });
+                        showToast('success', 'Wake word changed');
+                      }}
+                      disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                    >
+                      {availableWakeWordModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Threshold Slider */}
+                  <div className="mb-4">
+                    <label className="block text-sm text-slate-400 mb-2">
+                      Sensitivity: {Math.round(voiceSettings.wakeWordThreshold * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min="0.3"
+                      max="0.8"
+                      step="0.05"
+                      value={voiceSettings.wakeWordThreshold}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ wakeWordThreshold: parseFloat(e.target.value) })}
+                      disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
+                    />
+                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                      <span>Less sensitive</span>
+                      <span>More sensitive</span>
+                    </div>
+                  </div>
+
+                  {/* Timeout */}
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-2">
+                      Timeout: {voiceSettings.wakeWordTimeoutSeconds}s
+                    </label>
+                    <input
+                      type="range"
+                      min="5"
+                      max="30"
+                      step="1"
+                      value={voiceSettings.wakeWordTimeoutSeconds}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleVoiceSettingChange({ wakeWordTimeoutSeconds: parseInt(e.target.value, 10) })}
+                      disabled={!voiceServiceAvailable || !voiceSettings.wakeWordEnabled}
+                      className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
+                    />
+                    <div className="flex justify-between text-xs text-slate-500 mt-1">
+                      <span>5s</span>
+                      <span>30s</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">
+                      How long to stay active after wake word before returning to listening
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleSection>
+
+            {/* Agent Section - Collapsed by default */}
+            <CollapsibleSection
+              title="Agent"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              }
+              iconColor="text-emerald-400"
+              defaultOpen={false}
+              badge={
+                authorizations.length > 0 ? (
+                  <span className="text-xs bg-emerald-600/20 text-emerald-400 px-2 py-0.5 rounded ml-2">
+                    {authorizations.length} saved
+                  </span>
+                ) : null
+              }
+            >
+              <div className="pt-4 space-y-6">
+                {/* Saved Authorizations */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      Saved Authorizations
+                    </h4>
+                    {authorizations.length > 0 && (
+                      <button
+                        onClick={handleClearAllAuthorizations}
+                        className="text-xs text-slate-400 hover:text-red-400 transition-colors"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                  
+                  <p className="text-xs text-slate-500 mb-3">
+                    Actions you've allowed the agent to perform without asking for confirmation each time.
+                  </p>
+
+                  {loadingAuths ? (
+                    <div className="text-sm text-slate-400 p-4 bg-slate-900/50 rounded-lg text-center">
+                      Loading...
+                    </div>
+                  ) : authorizations.length === 0 ? (
+                    <div className="text-sm text-slate-500 p-4 bg-slate-900/50 rounded-lg text-center">
+                      No saved authorizations yet. When you allow an action with "Remember", it will appear here.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {authorizations.map((auth) => (
+                        <div
+                          key={auth.id}
+                          className="flex items-center justify-between p-3 bg-slate-900/50 rounded-lg"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-sm text-white">{auth.toolName}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                auth.scope === 'tool' ? 'bg-violet-600/30 text-violet-400' :
+                                auth.scope === 'pattern' ? 'bg-amber-600/30 text-amber-400' :
+                                'bg-slate-600/30 text-slate-400'
+                              }`}>
+                                {auth.scope === 'tool' ? 'All' : auth.scope === 'pattern' ? 'Pattern' : 'Exact'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 truncate mt-1" title={auth.description}>
+                              {auth.description}
+                            </div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              Added {new Date(auth.createdAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleRevokeAuthorization(auth.id)}
+                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex-shrink-0 ml-2"
+                            title="Revoke authorization"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Danger Zone */}
+                <div className="bg-red-900/10 border border-red-900/30 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-red-400 mb-3 flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    Danger Zone
+                  </h4>
+                  
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-slate-300">Reset Assistant</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Clear all personalization and start the setup process again.
+                        This will forget your name, preferences, and custom personality.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowResetModal(true)}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium transition-colors flex-shrink-0 ml-4"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleSection>
+          </div>
         )}
       </div>
 
@@ -843,6 +1368,18 @@ The model can ask for permission to enable specific tools when needed. Your curr
         cancelLabel="Cancel"
         onConfirm={handleOllamaConfirm}
         onCancel={handleOllamaCancel}
+      />
+
+      {/* Reset Assistant Confirmation Modal */}
+      <ConfirmModal
+        isOpen={showResetModal}
+        title="Reset Assistant?"
+        message="This will clear all personalization including your name, the assistant's name, personality settings, and custom system prompt. The assistant will ask you to set everything up again."
+        confirmLabel={resetting ? 'Resetting...' : 'Reset Everything'}
+        cancelLabel="Cancel"
+        onConfirm={handleResetAssistant}
+        onCancel={() => setShowResetModal(false)}
+        danger
       />
     </div>
   );

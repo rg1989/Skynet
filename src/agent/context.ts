@@ -3,6 +3,7 @@ import type { Config } from '../config/schema.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { getPersona } from './personas.js';
 import { SECURITY_INSTRUCTIONS } from './security.js';
+import { isOnboardingComplete, buildPersonalizationPrefix } from '../onboarding/index.js';
 
 /**
  * Context builder - assembles messages for LLM
@@ -35,7 +36,7 @@ export interface BuiltContext {
 function generateToolKnowledge(allSkills: Skill[], enabledSkills: Skill[]): string {
   if (allSkills.length === 0) return '';
 
-  const enabledNames = new Set(enabledSkills.map(s => s.name));
+  const enabledNames = new Set(enabledSkills.map((s: Skill) => s.name));
   
   // Group skills by category for cleaner presentation
   const categories: Record<string, Skill[]> = {
@@ -73,9 +74,9 @@ function generateToolKnowledge(allSkills: Skill[], enabledSkills: Skill[]): stri
   }
 
   const categoryList = Object.entries(categories)
-    .filter(([_, skills]) => skills.length > 0)
-    .map(([category, skills]) => {
-      const skillList = skills.map(s => {
+    .filter(([_, skills]: [string, Skill[]]) => skills.length > 0)
+    .map(([category, skills]: [string, Skill[]]) => {
+      const skillList = skills.map((s: Skill) => {
         const status = enabledNames.has(s.name) ? '✓' : '○';
         return `  ${status} ${s.name}: ${s.description}`;
       }).join('\n');
@@ -100,10 +101,10 @@ ${categoryList}
 function generateToolInstructions(skills: Skill[]): string {
   if (skills.length === 0) return '';
 
-  const toolList = skills.map(skill => {
+  const toolList = skills.map((skill: Skill) => {
     const argsDesc = skill.parameters?.properties
       ? Object.entries(skill.parameters.properties as Record<string, { description?: string }>)
-          .map(([key, val]) => `    - ${key}: ${val.description || 'No description'}`)
+          .map(([key, val]: [string, { description?: string }]) => `    - ${key}: ${val.description || 'No description'}`)
           .join('\n')
       : '    (no arguments)';
     return `**${skill.name}**: ${skill.description}\n${argsDesc}`;
@@ -149,6 +150,22 @@ IMPORTANT:
  * Build system prompt
  */
 function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: Skill[], allSkills: Skill[], personaId?: string): string {
+  // Check if onboarding is needed - if so, use the onboarding persona
+  const onboardingNeeded = !isOnboardingComplete();
+  
+  if (onboardingNeeded) {
+    // Use the onboarding persona for first-run setup
+    const onboardingPersona = getPersona('onboarding');
+    const toolKnowledge = generateToolKnowledge(allSkills, enabledSkills);
+    const toolInstructions = (toolsMode === 'text' || toolsMode === 'hybrid')
+      ? generateToolInstructions(enabledSkills)
+      : '';
+    return onboardingPersona.systemPrompt + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
+  }
+  
+  // Get personalization prefix from onboarding facts
+  const personalizationPrefix = buildPersonalizationPrefix();
+  
   // Check for persona-specific prompt
   const persona = personaId ? getPersona(personaId) : null;
   const personaPrompt = persona?.systemPrompt;
@@ -156,10 +173,11 @@ function buildSystemPrompt(config: Config, toolsMode: ToolsMode, enabledSkills: 
   // If tools are disabled, use a simpler prompt without tool mentions
   if (toolsMode === 'disabled') {
     // Use persona prompt if available, otherwise default
-    return personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
+    const basePrompt = personaPrompt || config.agent.systemPrompt || `You are Skynet, a helpful personal AI assistant.
 
 Be helpful, accurate, and conversational. Answer questions directly and naturally.
 Do not attempt to use tools, functions, or output JSON - just respond in plain text.`;
+    return personalizationPrefix + basePrompt;
   }
 
   // Use persona prompt as base if available
@@ -198,7 +216,8 @@ After completing a task, summarize what was done.`;
     : '';
 
   // Append security instructions to help defend against prompt injection
-  return basePrompt + memorySection + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
+  // Prepend personalization from onboarding facts
+  return personalizationPrefix + basePrompt + memorySection + toolKnowledge + toolInstructions + SECURITY_INSTRUCTIONS;
 }
 
 /**
@@ -223,7 +242,7 @@ export function buildContext(params: ContextBuildParams): BuiltContext {
   
   // Filter out disabled tools using runtime config
   const runtimeConfig = getRuntimeConfig();
-  const enabledSkills = skills.filter(s => runtimeConfig.isToolEnabled(s.name));
+  const enabledSkills = skills.filter((s: Skill) => runtimeConfig.isToolEnabled(s.name));
   
   // Build system prompt with tool knowledge (all skills) and instructions (enabled only)
   const systemPrompt = buildSystemPrompt(config, toolsMode, enabledSkills, skills, persona);

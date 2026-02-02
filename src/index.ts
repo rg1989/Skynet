@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { loadConfig } from './config/loader.js';
 import { initializeRuntimeConfig, initializeDefaultToolStates } from './config/runtime.js';
 import { createAppServer } from './server/http.js';
-import { setScheduler, setAgentRunner, setProviderManager } from './server/routes.js';
-import { setAgentRunner as setWsAgentRunner } from './server/ws-handler.js';
+import { setScheduler, setAgentRunner, setProviderManager, setVoiceManager as setRoutesVoiceManager } from './server/routes.js';
+import { setAgentRunner as setWsAgentRunner, setVoiceManager as setWsVoiceManager } from './server/ws-handler.js';
 import { createProviderManager } from './providers/index.js';
 import { AgentRunner } from './agent/index.js';
 import { createCoreSkillRegistry, initializeMemorySkills, initializeVisionSkills, initializeAudioSkills, initializeSelfConfigSkills, initializeScheduleSkills } from './skills/index.js';
@@ -12,8 +12,10 @@ import { MemoryStore } from './memory/index.js';
 import { Scheduler } from './scheduler/index.js';
 import { detectPlatform, createHardwareAdapter } from './hardware/index.js';
 import { mkdirSync, existsSync } from 'fs';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, exec, type ChildProcess } from 'child_process';
 import { join } from 'path';
+import { getVoiceManager } from './voice/index.js';
+import { isOnboardingComplete } from './onboarding/index.js';
 
 /**
  * Skynet Lite - Personal AI Assistant
@@ -133,8 +135,12 @@ async function main(): Promise<void> {
   console.log('Self-configuration skills initialized');
 
   // Initialize default tool states - all tools disabled except self-config
-  initializeDefaultToolStates(skillRegistry.getNames());
-  console.log('Default tool states: only self-config tools enabled');
+  // If onboarding is needed, also enable memory tools for saving preferences
+  const needsOnboarding = !isOnboardingComplete();
+  initializeDefaultToolStates(skillRegistry.getNames(), needsOnboarding);
+  if (needsOnboarding) {
+    console.log('Onboarding mode: memory tools enabled for setup');
+  }
 
   // Set agent runner and provider manager on routes for API
   setAgentRunner(agentRunner);
@@ -207,6 +213,28 @@ async function main(): Promise<void> {
     console.log('  cd prefect && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt');
   }
 
+  // Initialize Voice service (TTS and Wake Word)
+  const voiceManager = getVoiceManager();
+  let voiceRunning = false;
+  const voiceDisabled = process.env.VOICE_DISABLED === 'true';
+  
+  // Set voice manager on ws-handler and routes
+  setWsVoiceManager(voiceManager);
+  setRoutesVoiceManager(voiceManager);
+  
+  if (!voiceDisabled && voiceManager.isAvailable()) {
+    voiceRunning = await voiceManager.start();
+    if (voiceRunning) {
+      // Forward voice events to WebSocket clients
+      voiceManager.onMessage((type, payload) => {
+        server.wsHandler.broadcast(type as any, payload);
+      });
+    }
+  } else if (!voiceDisabled) {
+    console.log('[Voice] Voice service not set up. To enable:');
+    console.log('  cd voice && python3 -m venv venv && source venv/bin/activate && pip install -e .');
+  }
+
   // Initialize Telegram bot (if configured)
   let telegramBot: TelegramBot | undefined;
   if (config.telegram.botToken && config.telegram.botToken.length > 10) {
@@ -229,6 +257,10 @@ async function main(): Promise<void> {
     console.log(`\nReceived ${signal}, shutting down...`);
     
     scheduler.stop();
+    
+    if (voiceManager.isRunning()) {
+      voiceManager.stop();
+    }
     
     if (prefectProcess) {
       console.log('Stopping Prefect bridge...');
@@ -260,20 +292,40 @@ async function main(): Promise<void> {
   }
 
   // Log status
-  const isDev = process.env.NODE_ENV !== 'production';
   console.log('');
   console.log('=== Skynet Lite Ready ===');
+  console.log(`  Web UI: http://${config.server.host === '0.0.0.0' ? 'localhost' : config.server.host}:${config.server.port}`);
   console.log(`  API: http://${config.server.host}:${config.server.port}`);
   console.log(`  WebSocket: ws://${config.server.host}:${config.server.port}`);
-  if (isDev) {
-    console.log(`  Dev UI: http://localhost:5173 (hot reload)`);
-  }
   console.log(`  Provider: ${config.providers.default}`);
   console.log(`  Telegram: ${telegramBot?.running ? 'connected' : 'not connected'}`);
   console.log(`  Prefect: ${prefectProcess ? 'running (bridge at :4201)' : !prefectDisabled ? 'enabled (start manually)' : 'disabled'}`);
+  console.log(`  Voice: ${voiceRunning ? 'running (TTS/Wake Word at :4202)' : !voiceDisabled ? 'not set up (run: cd voice && python3 -m venv venv && pip install -e .)' : 'disabled'}`);
   console.log(`  Skills: ${skillRegistry.count} loaded`);
   console.log(`  Memory: ${config.agent.memory?.enabled ? 'enabled' : 'disabled'}`);
   console.log('');
+
+  // Auto-open browser on first run (when onboarding is needed)
+  if (!isOnboardingComplete()) {
+    const host = config.server.host === '0.0.0.0' ? 'localhost' : config.server.host;
+    // Always use the backend URL which serves the built frontend
+    // The dev server (5173) is only available when running `npm run dev:web` separately
+    const url = `http://${host}:${config.server.port}`;
+    console.log('First run detected - opening browser for setup...');
+    console.log(`  Opening: ${url}`);
+    
+    // Cross-platform browser open
+    const openCmd = process.platform === 'darwin' ? 'open'
+                  : process.platform === 'win32' ? 'start'
+                  : 'xdg-open';
+    
+    exec(`${openCmd} ${url}`, (error) => {
+      if (error) {
+        console.log(`  Could not auto-open browser: ${error.message}`);
+        console.log(`  Please open ${url} manually to complete setup.`);
+      }
+    });
+  }
 }
 
 main().catch((error) => {

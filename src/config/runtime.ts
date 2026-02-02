@@ -370,6 +370,13 @@ const SELF_CONFIG_TOOLS = [
   'set_system_prompt',
 ];
 
+// Memory tools needed during onboarding to save user preferences
+const ONBOARDING_TOOLS = [
+  'remember_fact',
+  'recall_fact',
+  'list_facts',
+];
+
 // Singleton instance
 let runtimeConfigInstance: RuntimeConfig | null = null;
 
@@ -384,17 +391,26 @@ export function initializeRuntimeConfig(baseConfig: Config, configFilePath?: str
 /**
  * Initialize default tool states - all tools disabled except self-config
  * This should be called after skills are registered
+ * @param allToolNames - List of all available tool names
+ * @param onboardingMode - If true, also enables memory tools needed for onboarding
  */
-export function initializeDefaultToolStates(allToolNames: string[]): void {
+export function initializeDefaultToolStates(allToolNames: string[], onboardingMode: boolean = false): void {
   if (!runtimeConfigInstance) {
     throw new Error('RuntimeConfig not initialized. Call initializeRuntimeConfig first.');
   }
   
-  // Disable all tools except self-config tools
-  const toolsToDisable = allToolNames.filter(name => !SELF_CONFIG_TOOLS.includes(name));
+  // Determine which tools to keep enabled
+  const enabledTools = [...SELF_CONFIG_TOOLS];
+  if (onboardingMode) {
+    enabledTools.push(...ONBOARDING_TOOLS);
+  }
+  
+  // Disable all tools except the enabled ones
+  const toolsToDisable = allToolNames.filter(name => !enabledTools.includes(name));
   runtimeConfigInstance.setDisabledTools(toolsToDisable);
   
-  console.log(`[runtime] Default tool states: ${SELF_CONFIG_TOOLS.length} enabled (self-config), ${toolsToDisable.length} disabled`);
+  const modeLabel = onboardingMode ? 'self-config + onboarding' : 'self-config';
+  console.log(`[runtime] Default tool states: ${enabledTools.length} enabled (${modeLabel}), ${toolsToDisable.length} disabled`);
 }
 
 /**

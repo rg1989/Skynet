@@ -1,0 +1,52 @@
+[project]
+name = "skynet-voice"
+version = "0.1.0"
+description = "Voice service for Skynet - TTS (Kokoro) and Wake Word (OpenWakeWord)"
+requires-python = ">=3.10"
+dependencies = [
+    # Audio processing
+    "numpy>=2.0.0",
+    
+    # TTS - Kokoro with MLX backend for Apple Silicon
+    "kokoro>=0.9.0",
+    
+    # Wake word detection (macOS only - tflite-runtime doesn't support Python 3.12+ on Linux)
+    "openwakeword>=0.6.0; sys_platform == 'darwin'",
+    
+    # Web interface
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=14.0",
+    
+    # Configuration
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+]
+# Wake word support for Linux (requires Python 3.11 or manual tflite-runtime install)
+wakeword = [
+    "openwakeword>=0.6.0",
+]
+
+[project.scripts]
+voice-server = "src.server:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

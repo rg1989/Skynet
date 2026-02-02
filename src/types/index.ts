@@ -125,6 +125,12 @@ export type WSEventType =
   | 'task:updated'
   | 'task:deleted'
   | 'task:triggered'
+  | 'voice:tts_audio'       // TTS audio segment from voice service
+  | 'voice:tts_start'       // TTS started for message
+  | 'voice:tts_complete'    // TTS finished for message
+  | 'voice:wake_status'     // Wake word state change
+  | 'voice:settings'        // Voice settings update
+  | 'voice:connected'       // Voice service connected
   | 'error';
 
 export interface WSEvent {
@@ -133,6 +139,9 @@ export interface WSEvent {
   timestamp: number;
 }
 
+// Authorization scope levels for persistent approvals
+export type AuthorizationScope = 'exact' | 'pattern' | 'tool';
+
 // Tool confirmation request/response for high-risk output tools
 export interface ToolConfirmationRequest {
   confirmId: string;
@@ -140,11 +149,23 @@ export interface ToolConfirmationRequest {
   toolName: string;
   toolParams: Record<string, unknown>;
   riskReason: string;
+  // Extended fields for authorization
+  commandExplanation?: {
+    summary: string;
+    details: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    warnings: string[];
+  };
+  suggestedScopes?: AuthorizationScope[];
+  canRemember?: boolean;
 }
 
 export interface ToolConfirmationResponse {
   confirmId: string;
   approved: boolean;
+  // Extended fields for authorization
+  remember?: boolean;
+  scope?: AuthorizationScope;
 }
 
 // Memory types

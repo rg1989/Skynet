@@ -29,7 +29,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private convertMessages(messages: ChatParams['messages']): ChatCompletionMessageParam[] {
-    return messages.map(m => {
+    return messages.map((m: ChatParams['messages'][0]) => {
       if (m.role === 'system') {
         return { role: 'system' as const, content: m.content };
       }
@@ -117,7 +117,7 @@ export class OpenAIProvider implements LLMProvider {
       const finishReason = chunk.choices[0]?.finish_reason;
       if (finishReason) {
         const toolCalls = toolCallsAccumulator.size > 0 
-          ? Array.from(toolCallsAccumulator.values()).map(tc => ({
+          ? Array.from(toolCallsAccumulator.values()).map((tc: { id: string; name: string; arguments: string }) => ({
               id: tc.id,
               name: tc.name,
               arguments: JSON.parse(tc.arguments || '{}'),

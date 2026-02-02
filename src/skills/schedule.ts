@@ -95,14 +95,14 @@ export const listScheduledTasksSkill: Skill = {
       let tasks = scheduler.getTasks();
       
       if (enabled_only === 'true') {
-        tasks = tasks.filter(t => t.enabled);
+        tasks = tasks.filter((t: ScheduledTask) => t.enabled);
       }
 
       return {
         success: true,
         data: {
           count: tasks.length,
-          tasks: tasks.map(t => ({
+          tasks: tasks.map((t: ScheduledTask) => ({
             id: t.id,
             name: t.name,
             cron: t.cron,

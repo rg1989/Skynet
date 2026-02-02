@@ -61,7 +61,7 @@ export class OllamaProvider implements LLMProvider {
     const response = await this.withTimeout(
       this.client.chat({
         model: this.model,
-        messages: params.messages.map(m => ({
+        messages: params.messages.map((m: ChatParams['messages'][0]) => ({
           role: m.role,
           content: m.content,
         })),
@@ -108,7 +108,7 @@ export class OllamaProvider implements LLMProvider {
 
     const stream = await this.client.chat({
       model: this.model,
-      messages: params.messages.map(m => ({
+      messages: params.messages.map((m: ChatParams['messages'][0]) => ({
         role: m.role,
         content: m.content,
       })),
@@ -171,7 +171,7 @@ export class OllamaProvider implements LLMProvider {
     try {
       // Check if whisper model exists
       const models = await this.client.list();
-      const hasWhisper = models.models.some(m => m.name.includes('whisper'));
+      const hasWhisper = models.models.some((m: { name: string }) => m.name.includes('whisper'));
       
       if (hasWhisper) {
         // Ollama doesn't have native whisper support yet

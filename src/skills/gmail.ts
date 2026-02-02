@@ -141,7 +141,7 @@ export const gmailReadSkill: Skill = {
 
       // Get message details
       const emails = await Promise.all(
-        messages.slice(0, 10).map(async (msg) => {
+        messages.slice(0, 10).map(async (msg: { id?: string | null; threadId?: string | null }) => {
           const detail = await gmailClient!.users.messages.get({
             userId: 'me',
             id: msg.id!,
@@ -151,7 +151,7 @@ export const gmailReadSkill: Skill = {
 
           const headers = detail.data.payload?.headers || [];
           const getHeader = (name: string) => 
-            headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+            headers.find((h: { name?: string | null; value?: string | null }) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
 
           let body = '';
           if (include_body && detail.data.payload) {

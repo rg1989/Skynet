@@ -1,0 +1,2 @@
+[console_scripts]
+voice-server = src.server:main

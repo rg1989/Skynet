@@ -6,6 +6,7 @@ import type { WSHandler } from './ws-handler.js';
 import type { Scheduler } from '../scheduler/cron.js';
 import type { AgentRunner } from '../agent/runner.js';
 import type { ProviderManager } from '../providers/index.js';
+import type { VoiceServiceManager } from '../voice/manager.js';
 import { getRuntimeConfig } from '../config/runtime.js';
 import { getMemoryStore } from '../skills/memory.js';
 
@@ -18,11 +19,51 @@ interface SessionMessage {
   timestamp: number;
 }
 
+// Session source types for grouping
+type SessionSource = 'telegram' | 'whatsapp' | 'web' | 'other';
+
 interface SessionInfo {
   key: string;
   messageCount: number;
   lastActivity: number;
   createdAt: number;
+  source: SessionSource;
+  title?: string;
+}
+
+/**
+ * Infer session source and title from the session key
+ */
+function parseSessionKey(key: string): { source: SessionSource; title: string } {
+  // Telegram sessions: telegram:dm:{userId} or telegram:group:{chatId}
+  if (key.startsWith('telegram_dm_') || key.startsWith('telegram:dm:')) {
+    const userId = key.replace(/telegram[_:]dm[_:]/, '');
+    return { source: 'telegram', title: `DM ${userId}` };
+  }
+  if (key.startsWith('telegram_group_') || key.startsWith('telegram:group:')) {
+    const chatId = key.replace(/telegram[_:]group[_:]/, '');
+    return { source: 'telegram', title: `Group ${chatId}` };
+  }
+  
+  // WhatsApp sessions (for future support)
+  if (key.startsWith('whatsapp_') || key.startsWith('whatsapp:')) {
+    const chatId = key.replace(/whatsapp[_:]/, '');
+    return { source: 'whatsapp', title: `WhatsApp ${chatId}` };
+  }
+  
+  // Web sessions
+  if (key.startsWith('chat-')) {
+    const timestamp = key.replace('chat-', '');
+    const date = new Date(parseInt(timestamp));
+    const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return { source: 'web', title: `Chat ${timeStr}` };
+  }
+  if (key === 'web-default') {
+    return { source: 'web', title: 'Default Chat' };
+  }
+  
+  // Other/unknown sources
+  return { source: 'other', title: key };
 }
 
 async function listSessions(): Promise<SessionInfo[]> {
@@ -30,7 +71,7 @@ async function listSessions(): Promise<SessionInfo[]> {
     const files = await readdir(SESSIONS_DIR);
     const sessions: SessionInfo[] = [];
     
-    for (const file of files) {
+    for (const file of files as string[]) {
       if (!file.endsWith('.jsonl')) continue;
       
       const key = file.replace('.jsonl', '');
@@ -38,17 +79,21 @@ async function listSessions(): Promise<SessionInfo[]> {
       
       try {
         const content = await readFile(filePath, 'utf-8');
-        const lines = content.trim().split('\n').filter(l => l.trim());
-        const messages = lines.map(l => JSON.parse(l) as SessionMessage);
+        const lines = content.trim().split('\n').filter((l: string) => l.trim());
+        const messages = lines.map((l: string) => JSON.parse(l) as SessionMessage);
         
         const fileStat = await stat(filePath);
-        const timestamps = messages.map(m => m.timestamp).filter(t => t);
+        const timestamps = messages.map((m: SessionMessage) => m.timestamp).filter((t: number) => t);
+        
+        const { source, title } = parseSessionKey(key);
         
         sessions.push({
           key,
           messageCount: messages.length,
           lastActivity: timestamps.length > 0 ? Math.max(...timestamps) : fileStat.mtimeMs,
           createdAt: timestamps.length > 0 ? Math.min(...timestamps) : fileStat.birthtimeMs,
+          source,
+          title,
         });
       } catch {
         // Skip malformed files
@@ -56,7 +101,7 @@ async function listSessions(): Promise<SessionInfo[]> {
     }
     
     // Sort by last activity, most recent first
-    return sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+    return sessions.sort((a: SessionInfo, b: SessionInfo) => b.lastActivity - a.lastActivity);
   } catch {
     return [];
   }
@@ -67,8 +112,8 @@ async function readSession(key: string): Promise<SessionMessage[]> {
   
   try {
     const content = await readFile(filePath, 'utf-8');
-    const lines = content.trim().split('\n').filter(l => l.trim());
-    return lines.map(l => JSON.parse(l) as SessionMessage);
+    const lines = content.trim().split('\n').filter((l: string) => l.trim());
+    return lines.map((l: string) => JSON.parse(l) as SessionMessage);
   } catch {
     return [];
   }
@@ -93,6 +138,7 @@ async function deleteSession(key: string): Promise<boolean> {
 let scheduler: Scheduler | null = null;
 let agentRunner: AgentRunner | null = null;
 let providerManager: ProviderManager | null = null;
+let voiceManager: VoiceServiceManager | null = null;
 
 export function setScheduler(s: Scheduler): void {
   scheduler = s;
@@ -104,6 +150,10 @@ export function setAgentRunner(a: AgentRunner): void {
 
 export function setProviderManager(p: ProviderManager): void {
   providerManager = p;
+}
+
+export function setVoiceManager(v: VoiceServiceManager): void {
+  voiceManager = v;
 }
 
 export function createRoutes(config: Config, wsHandler: WSHandler): Router {
@@ -363,7 +413,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const currentProvider = runtimeConfig.getCurrentProvider();
       
       const providers = await Promise.all(
-        available.map(async (name) => {
+        available.map(async (name: string) => {
           const isAvailable = await providerManager?.checkAvailability(name) ?? false;
           const model = runtimeConfig.getCurrentModel(name);
           return {
@@ -397,7 +447,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
         }
         
         const data = await response.json() as { models: Array<{ name: string; size: number; modified_at: string }> };
-        const models = data.models.map(m => ({
+        const models = data.models.map((m: { name: string; size: number; modified_at: string }) => ({
           name: m.name,
           size: m.size,
           modified: m.modified_at,
@@ -597,7 +647,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const disabledTools = runtimeConfig.getDisabledTools();
       const toolsMode = runtimeConfig.getToolsMode();
       
-      const tools = skills.map(skill => ({
+      const tools = skills.map((skill: { name: string; description: string; parameters?: Record<string, unknown> }) => ({
         name: skill.name,
         description: skill.description,
         enabled: !disabledTools.includes(skill.name),
@@ -620,7 +670,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       // Check if tool exists
-      const tool = skills.find(s => s.name === name);
+      const tool = skills.find((s: { name: string }) => s.name === name);
       if (!tool) {
         res.status(404).json({ error: `Tool not found: ${name}` });
         return;
@@ -651,7 +701,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       const skills = agentRunner?.getSkills() || [];
       
       let disabledCount = 0;
-      for (const skill of skills) {
+      for (const skill of skills as Array<{ name: string }>) {
         if (!OLLAMA_META_TOOLS.includes(skill.name)) {
           runtimeConfig.disableTool(skill.name);
           disabledCount++;
@@ -659,7 +709,7 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       }
       
       // Ensure meta-tools are enabled
-      for (const name of OLLAMA_META_TOOLS) {
+      for (const name of OLLAMA_META_TOOLS as string[]) {
         runtimeConfig.enableTool(name);
       }
       
@@ -686,13 +736,13 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
     try {
       const runtimeConfig = getRuntimeConfig();
       const skills = agentRunner?.getSkills() || [];
-      const validToolNames = skills.map(s => s.name);
+      const validToolNames = skills.map((s: { name: string }) => s.name);
       
       let enabledCount = 0;
       const enabled: string[] = [];
       const notFound: string[] = [];
       
-      for (const name of tools) {
+      for (const name of tools as string[]) {
         if (validToolNames.includes(name)) {
           runtimeConfig.enableTool(name);
           enabled.push(name);
@@ -710,6 +760,50 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       });
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to enable tools' });
+    }
+  });
+
+  // Enable all tools
+  router.post('/tools/enable-all', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      const skills = agentRunner?.getSkills() || [];
+      
+      let enabledCount = 0;
+      for (const skill of skills as Array<{ name: string }>) {
+        runtimeConfig.enableTool(skill.name);
+        enabledCount++;
+      }
+      
+      res.json({ 
+        status: 'ok', 
+        enabledCount,
+        message: `Enabled ${enabledCount} tools.`,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to enable tools' });
+    }
+  });
+
+  // Disable all tools
+  router.post('/tools/disable-all', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      const skills = agentRunner?.getSkills() || [];
+      
+      let disabledCount = 0;
+      for (const skill of skills as Array<{ name: string }>) {
+        runtimeConfig.disableTool(skill.name);
+        disabledCount++;
+      }
+      
+      res.json({ 
+        status: 'ok', 
+        disabledCount,
+        message: `Disabled ${disabledCount} tools.`,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to disable tools' });
     }
   });
 
@@ -832,6 +926,245 @@ export function createRoutes(config: Config, wsHandler: WSHandler): Router {
       }
     } catch (error) {
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to warmup' });
+    }
+  });
+
+  // ========================================
+  // Voice Service (TTS & Wake Word)
+  // ========================================
+
+  // Get voice service status
+  router.get('/voice/status', (_req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.json({
+        available: false,
+        running: false,
+        connected: false,
+      });
+      return;
+    }
+
+    res.json({
+      available: voiceManager.isAvailable(),
+      running: voiceManager.isRunning(),
+      connected: voiceManager.isConnected(),
+    });
+  });
+
+  // Get voice settings
+  router.get('/voice/settings', (_req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.status(503).json({ error: 'Voice service not available' });
+      return;
+    }
+
+    res.json(voiceManager.getSettings());
+  });
+
+  // Update voice settings
+  router.put('/voice/settings', async (req: Request, res: Response) => {
+    if (!voiceManager) {
+      res.status(503).json({ error: 'Voice service not available' });
+      return;
+    }
+
+    const { tts, wakeword } = req.body;
+
+    try {
+      if (tts) {
+        if (typeof tts.enabled === 'boolean') {
+          voiceManager.setTtsEnabled(tts.enabled);
+        }
+        if (typeof tts.muted === 'boolean') {
+          voiceManager.setTtsMuted(tts.muted);
+        }
+        if (tts.voice) {
+          voiceManager.setVoice(tts.voice);
+        }
+        if (typeof tts.speed === 'number') {
+          voiceManager.setSpeed(tts.speed);
+        }
+      }
+
+      if (wakeword) {
+        voiceManager.setWakewordSettings(wakeword);
+      }
+
+      res.json(voiceManager.getSettings());
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to update settings' });
+    }
+  });
+
+  // Get available TTS voices
+  router.get('/voice/voices', (_req: Request, res: Response) => {
+    // These are the Kokoro TTS voices
+    const voices = {
+      'af_heart': 'American Female - Heart (warm, friendly)',
+      'af_bella': 'American Female - Bella',
+      'af_sarah': 'American Female - Sarah',
+      'af_nicole': 'American Female - Nicole',
+      'af_sky': 'American Female - Sky',
+      'am_adam': 'American Male - Adam',
+      'am_michael': 'American Male - Michael',
+      'bf_emma': 'British Female - Emma',
+      'bf_isabella': 'British Female - Isabella',
+      'bm_george': 'British Male - George',
+      'bm_lewis': 'British Male - Lewis',
+    };
+
+    res.json({ voices });
+  });
+
+  // Get available wake word models
+  router.get('/voice/wakeword/models', (_req: Request, res: Response) => {
+    const models = {
+      'hey_jarvis': 'Hey Jarvis',
+      'alexa': 'Alexa',
+      'hey_mycroft': 'Hey Mycroft',
+      'hey_rhasspy': 'Hey Rhasspy',
+    };
+
+    res.json({ models });
+  });
+
+  // Synthesize text (for testing)
+  router.post('/voice/synthesize', async (req: Request, res: Response) => {
+    if (!voiceManager || !voiceManager.isConnected()) {
+      res.status(503).json({ error: 'Voice service not connected' });
+      return;
+    }
+
+    const { text, messageId } = req.body;
+    if (!text) {
+      res.status(400).json({ error: 'Text is required' });
+      return;
+    }
+
+    voiceManager.synthesize(text, messageId || 'test', true);
+    res.json({ status: 'synthesizing' });
+  });
+
+  // ========================================
+  // Onboarding
+  // ========================================
+
+  // Get onboarding status
+  router.get('/onboarding/status', (_req: Request, res: Response) => {
+    try {
+      const memoryStore = getMemoryStore();
+      if (!memoryStore) {
+        // If memory store not available, assume setup needed
+        res.json({ needsSetup: true, facts: {} });
+        return;
+      }
+
+      const setupFact = memoryStore.getFact('skynet_setup_complete');
+      const needsSetup = setupFact?.value !== 'true';
+
+      // Get personalization facts if setup is complete
+      const facts: Record<string, string> = {};
+      if (!needsSetup) {
+        const factKeys = ['user_name', 'assistant_name', 'personality_tone', 'personality_style', 'special_rules'];
+        for (const key of factKeys as string[]) {
+          const fact = memoryStore.getFact(key);
+          if (fact) {
+            facts[key] = fact.value;
+          }
+        }
+      }
+
+      res.json({ needsSetup, facts });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get onboarding status' });
+    }
+  });
+
+  // Mark onboarding as complete and persist config
+  router.post('/onboarding/complete', async (_req: Request, res: Response) => {
+    try {
+      const runtimeConfig = getRuntimeConfig();
+      await runtimeConfig.persistToFile();
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to complete onboarding' });
+    }
+  });
+
+  // Reset onboarding - clear all personalization and start fresh
+  router.delete('/onboarding/reset', async (_req: Request, res: Response) => {
+    try {
+      const memoryStore = getMemoryStore();
+      if (!memoryStore) {
+        res.status(500).json({ error: 'Memory store not available' });
+        return;
+      }
+
+      // Delete all onboarding-related facts
+      const onboardingFacts = [
+        'skynet_setup_complete',
+        'user_name',
+        'assistant_name',
+        'personality_tone',
+        'personality_style',
+        'special_rules',
+      ];
+
+      for (const key of onboardingFacts as string[]) {
+        memoryStore.deleteFact(key);
+      }
+
+      // Reset system prompt to default
+      const runtimeConfig = getRuntimeConfig();
+      runtimeConfig.resetSystemPrompt();
+      await runtimeConfig.persistToFile();
+
+      res.json({ success: true, message: 'Assistant reset. Refresh to start onboarding.' });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to reset onboarding' });
+    }
+  });
+
+  // ========================================
+  // Tool Authorizations
+  // ========================================
+
+  // List all saved authorizations
+  router.get('/authorizations', (_req: Request, res: Response) => {
+    try {
+      const { listAuthorizations } = require('../agent/authorization.js');
+      const authorizations = listAuthorizations();
+      res.json({ authorizations });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to list authorizations' });
+    }
+  });
+
+  // Revoke an authorization
+  router.delete('/authorizations/:id', (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { revokeAuthorization } = require('../agent/authorization.js');
+      const success = revokeAuthorization(id);
+      
+      if (success) {
+        res.json({ success: true, message: 'Authorization revoked' });
+      } else {
+        res.status(404).json({ error: 'Authorization not found or could not be revoked' });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to revoke authorization' });
+    }
+  });
+
+  // Clear all authorizations
+  router.delete('/authorizations', (_req: Request, res: Response) => {
+    try {
+      const { clearAllAuthorizations } = require('../agent/authorization.js');
+      const count = clearAllAuthorizations();
+      res.json({ success: true, message: `Cleared ${count} authorizations` });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to clear authorizations' });
     }
   });
 

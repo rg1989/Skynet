@@ -182,16 +182,16 @@ export const listToolsSkill: Skill = {
       const filter = (params.filter as string) || 'all';
       const disabledTools = rc.getDisabledTools();
       
-      const tools = knownSkillNames.map(name => ({
+      const tools = knownSkillNames.map((name: string) => ({
         name,
         enabled: !disabledTools.includes(name),
       }));
 
       let filtered = tools;
       if (filter === 'enabled') {
-        filtered = tools.filter(t => t.enabled);
+        filtered = tools.filter((t: { name: string; enabled: boolean }) => t.enabled);
       } else if (filter === 'disabled') {
-        filtered = tools.filter(t => !t.enabled);
+        filtered = tools.filter((t: { name: string; enabled: boolean }) => !t.enabled);
       }
 
       return {
@@ -511,7 +511,7 @@ export const listModelsSkill: Skill = {
           success: true,
           data: {
             provider,
-            models: data.models.map(m => ({
+            models: data.models.map((m: { name: string; size: number }) => ({
               name: m.name,
               size: Math.round(m.size / 1024 / 1024 / 1024 * 10) / 10 + ' GB',
             })),
@@ -625,6 +625,9 @@ export const setSystemPromptSkill: Skill = {
       }
       
       rc.setSystemPrompt(finalPrompt);
+      
+      // Persist to config file so the prompt survives restarts
+      await rc.persistToFile();
 
       return {
         success: true,
@@ -632,6 +635,7 @@ export const setSystemPromptSkill: Skill = {
           message: append ? 'Appended to system prompt' : 'System prompt updated',
           promptLength: finalPrompt.length,
           takesEffectNextTurn: true,
+          persisted: true,
         },
       };
     } catch (error) {

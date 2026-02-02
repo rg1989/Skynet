@@ -1,7 +1,8 @@
-import { WebSocket, WebSocketServer } from 'ws';
-import type { Server } from 'http';
+import { WebSocket, WebSocketServer, type RawData } from 'ws';
+import type { Server, IncomingMessage } from 'http';
 import type { WSEvent, WSEventType, ToolConfirmationResponse } from '../types/index.js';
 import type { AgentRunner } from '../agent/runner.js';
+import type { VoiceServiceManager } from '../voice/manager.js';
 
 /**
  * WebSocket handler for real-time communication with clients
@@ -18,11 +19,21 @@ interface ConnectedClient {
 // Agent runner instance (set during initialization)
 let agentRunner: AgentRunner | null = null;
 
+// Voice service manager instance
+let voiceManager: VoiceServiceManager | null = null;
+
 /**
  * Set the agent runner instance for handling confirmation responses
  */
 export function setAgentRunner(runner: AgentRunner): void {
   agentRunner = runner;
+}
+
+/**
+ * Set the voice manager instance for handling voice events
+ */
+export function setVoiceManager(manager: VoiceServiceManager): void {
+  voiceManager = manager;
 }
 
 export class WSHandler {
@@ -37,7 +48,7 @@ export class WSHandler {
   }
 
   private setupHandlers(): void {
-    this.wss.on('connection', (ws, _req) => {
+    this.wss.on('connection', (ws: WebSocket, _req: IncomingMessage) => {
       const clientId = `client_${++this.clientIdCounter}`;
       const client: ConnectedClient = {
         id: clientId,
@@ -78,8 +89,13 @@ export class WSHandler {
         }
       }, 30000);
 
-      ws.on('message', (data) => {
-        this.handleMessage(clientId, data.toString());
+      ws.on('message', (data: RawData, isBinary: boolean) => {
+        if (isBinary) {
+          // Binary audio data for wake word detection
+          this.handleAudioData(clientId, data as Buffer);
+        } else {
+          this.handleMessage(clientId, data.toString());
+        }
       });
 
       ws.on('close', () => {
@@ -90,7 +106,7 @@ export class WSHandler {
         console.log(`WebSocket client disconnected: ${clientId} (total: ${this.clients.size})`);
       });
 
-      ws.on('error', (error) => {
+      ws.on('error', (error: Error) => {
         console.error(`WebSocket error for ${clientId}:`, error);
         if (client.pingInterval) {
           clearInterval(client.pingInterval);
@@ -123,12 +139,58 @@ export class WSHandler {
             }
           }
           break;
+        
+        // Voice-related messages
+        case 'voice:set_tts_muted':
+          if (voiceManager) {
+            voiceManager.setTtsMuted(message.payload?.muted ?? false);
+          }
+          break;
+        case 'voice:set_tts_enabled':
+          if (voiceManager) {
+            voiceManager.setTtsEnabled(message.payload?.enabled ?? true);
+          }
+          break;
+        case 'voice:set_voice':
+          if (voiceManager && message.payload?.voice) {
+            voiceManager.setVoice(message.payload.voice);
+          }
+          break;
+        case 'voice:set_speed':
+          if (voiceManager && message.payload?.speed) {
+            voiceManager.setSpeed(message.payload.speed);
+          }
+          break;
+        case 'voice:set_wakeword':
+          if (voiceManager && message.payload) {
+            voiceManager.setWakewordSettings(message.payload);
+          }
+          break;
+        case 'voice:stop_speaking':
+          if (voiceManager) {
+            voiceManager.stopSpeaking();
+          }
+          break;
+        case 'voice:get_settings':
+          if (voiceManager) {
+            this.sendTo(clientId, 'voice:settings', voiceManager.getSettings());
+          }
+          break;
         default:
           // Unknown message type
           break;
       }
     } catch (error) {
       console.error(`Failed to parse message from ${clientId}:`, error);
+    }
+  }
+
+  /**
+   * Handle binary audio data for wake word detection.
+   */
+  private handleAudioData(_clientId: string, data: Buffer): void {
+    if (voiceManager && voiceManager.isConnected()) {
+      voiceManager.sendAudio(data);
     }
   }
 

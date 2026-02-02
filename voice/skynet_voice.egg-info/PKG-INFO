@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: skynet-voice
+Version: 0.1.0
+Summary: Voice service for Skynet - TTS (Kokoro) and Wake Word (OpenWakeWord)
+Requires-Python: >=3.10
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: kokoro>=0.9.0
+Requires-Dist: openwakeword>=0.6.0; sys_platform == "darwin"
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.32.0
+Requires-Dist: websockets>=14.0
+Requires-Dist: pydantic>=2.10.0
+Requires-Dist: pydantic-settings>=2.7.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Provides-Extra: wakeword
+Requires-Dist: openwakeword>=0.6.0; extra == "wakeword"

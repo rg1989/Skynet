@@ -272,7 +272,7 @@ export class ToolCallParser {
     let result = text;
 
     // Sort by position in reverse order to replace from end to start
-    toolCalls.sort((a, b) => b.startPos - a.startPos);
+    toolCalls.sort((a: ParsedToolCall, b: ParsedToolCall) => b.startPos - a.startPos);
 
     for (const toolCall of toolCalls) {
       const announcement = `[Using tool: ${toolCall.name}]`;

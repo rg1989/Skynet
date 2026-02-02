@@ -7,6 +7,10 @@ interface WSEvent {
   timestamp: number;
 }
 
+// Voice event callbacks
+type VoiceAudioCallback = (audio: string, sampleRate: number, messageId?: string) => void;
+type WakeStatusCallback = (state: string, detected?: boolean) => void;
+
 // Singleton WebSocket connection - prevents duplicates from StrictMode or HMR
 let globalWs: WebSocket | null = null;
 let globalWsConnecting = false;
@@ -14,6 +18,24 @@ let reconnectTimeout: number | null = null;
 let hasInitialized = false;
 let currentRunId: string | null = null;
 let accumulatedContent = '';
+
+// Voice event callback registry (module-level to persist across re-renders)
+let voiceAudioCallback: VoiceAudioCallback | null = null;
+let wakeStatusCallback: WakeStatusCallback | null = null;
+
+/**
+ * Register a callback for TTS audio events
+ */
+export function onVoiceAudio(callback: VoiceAudioCallback | null) {
+  voiceAudioCallback = callback;
+}
+
+/**
+ * Register a callback for wake word status events
+ */
+export function onWakeStatus(callback: WakeStatusCallback | null) {
+  wakeStatusCallback = callback;
+}
 
 /**
  * Clears the current run state. Call this when the user clicks Stop
@@ -52,11 +74,27 @@ export function useWebSocket() {
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
-    setAvatarRatio,
-    setShowContent,
-    setContentUrl,
     setPendingConfirmation,
+    setNeedsOnboarding,
+    setOnboardingFacts,
   } = useStore();
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    fetch('/api/onboarding/status')
+      .then(res => res.json())
+      .then(data => {
+        setNeedsOnboarding(data.needsSetup);
+        if (!data.needsSetup && data.facts) {
+          setOnboardingFacts(data.facts);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to check onboarding status:', err);
+        // Default to not needing onboarding on error
+        setNeedsOnboarding(false);
+      });
+  }, [setNeedsOnboarding, setOnboardingFacts]);
 
   useEffect(() => {
     // Only initialize once per app lifetime (module-level flag survives StrictMode remounts)
@@ -109,6 +147,26 @@ export function useWebSocket() {
         case 'agent:tool_end':
           if (currentRunId && p.runId === currentRunId) {
             removeActiveTool(p.name as string);
+            
+            // Capture media from tool result
+            const toolMedia = p.media as {
+              type: 'image' | 'audio' | 'video' | 'document';
+              path: string;
+              mimeType?: string;
+            } | undefined;
+            
+            if (toolMedia && toolMedia.path) {
+              // Convert file path to server URL
+              const filename = toolMedia.path.split('/').pop();
+              const mediaUrl = `/api/media/${filename}`;
+              
+              useStore.getState().addPendingMedia({
+                type: toolMedia.type,
+                url: mediaUrl,
+                mimeType: toolMedia.mimeType,
+                caption: `Tool: ${p.name}`,
+              });
+            }
           }
           break;
 
@@ -122,26 +180,6 @@ export function useWebSocket() {
           }
           break;
 
-        case 'layout:update': {
-          // Handle layout updates from the agent (for Avatar Mode)
-          const layoutPayload = p as {
-            avatar_ratio?: number;
-            show_content?: boolean;
-            content_url?: string;
-          };
-          
-          if (layoutPayload.avatar_ratio !== undefined) {
-            setAvatarRatio(layoutPayload.avatar_ratio);
-          }
-          if (layoutPayload.show_content !== undefined) {
-            setShowContent(layoutPayload.show_content);
-          }
-          if (layoutPayload.content_url !== undefined) {
-            setContentUrl(layoutPayload.content_url);
-          }
-          break;
-        }
-
         case 'agent:confirm_required': {
           // Handle tool confirmation request for high-risk output tools
           const confirmPayload = p as {
@@ -154,6 +192,36 @@ export function useWebSocket() {
           setPendingConfirmation(confirmPayload);
           break;
         }
+
+        // Voice events
+        case 'voice:tts_audio':
+          if (voiceAudioCallback) {
+            voiceAudioCallback(
+              p.audio as string,
+              p.sampleRate as number,
+              p.messageId as string | undefined
+            );
+          }
+          break;
+
+        case 'voice:wake_status':
+          if (wakeStatusCallback) {
+            wakeStatusCallback(
+              p.state as string,
+              p.detected as boolean | undefined
+            );
+          }
+          // Also update store
+          useStore.getState().setWakeWordStatus(p.state as 'listening' | 'active' | 'disabled');
+          break;
+
+        case 'voice:tts_start':
+          useStore.getState().setIsTtsSpeaking(true);
+          break;
+
+        case 'voice:tts_complete':
+          useStore.getState().setIsTtsSpeaking(false);
+          break;
 
         default:
           // Ignore unhandled events
@@ -199,7 +267,7 @@ export function useWebSocket() {
         }, 3000);
       };
 
-      ws.onerror = (error) => {
+      ws.onerror = (error: Event) => {
         console.error('WebSocket error:', error);
         globalWsConnecting = false;
       };
@@ -233,9 +301,6 @@ export function useWebSocket() {
     addActiveTool,
     removeActiveTool,
     clearActiveTools,
-    setAvatarRatio,
-    setShowContent,
-    setContentUrl,
     setPendingConfirmation,
   ]);
 
